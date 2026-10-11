@@ -3,7 +3,7 @@
 - 状态：Superseded by ADR-0004（仅“一期只读”结论被取代；本文第 2、4 条即客户端 SQL 守卫与 `truncated` 保真继续有效）
 - 日期：2026-10-11
 - 决策者：项目维护者
-- 关联：`docs/README.md`（项目说明，实施阶段创建）、`examples/CLI-Anything/siyuan/core/client.py`（Python 参考实现）
+- 关联：`README.md`（项目说明）、`examples/CLI-Anything/siyuan/core/client.py`（Python 参考实现）
 
 ## 背景
 

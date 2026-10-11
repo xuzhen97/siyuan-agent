@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-10-11
 - 决策者：项目维护者
-- 关联：`docs/README.md`（项目说明，实施阶段创建）
+- 关联：`README.md`（项目说明）
 - 取代：`docs/adr/0002-read-only-boundary-and-client-side-sql-guard.md`（仅取代其"一期只读"结论；其客户端 SQL 守卫与 `truncated` 保真两条继续有效）
 
 ## 背景

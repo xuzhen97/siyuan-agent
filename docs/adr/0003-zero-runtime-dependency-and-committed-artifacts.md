@@ -3,7 +3,7 @@
 - 状态：Accepted
 - 日期：2026-10-11
 - 决策者：项目维护者
-- 关联：`docs/README.md`（项目说明，实施阶段创建）、`D:\VCPHub\VCPDeck`（插件制品与打包惯例）
+- 关联：`README.md`（项目说明）、`D:\VCPHub\VCPDeck`（插件制品与打包惯例）
 
 ## 背景
 

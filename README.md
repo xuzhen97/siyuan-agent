@@ -4,7 +4,7 @@
 
 - **45 条工具**（只读 19 + 写 26），覆盖笔记本（含配置读取）、文档树、块 kramdown、全文检索、标签、SQL 查询、Markdown 导出、日记，以及写入/修改/删除笔记与块。
 - **零运行时依赖**：只用 Node 内置能力（原生 `fetch`、`node:` 模块）。
-- **三条通道共用同一份真源**：`src/tools/definitions.ts` → Pi 工具 / VCP 命令 / CLI 子命令（详见 [ADR-0001](./adr/0001-single-tool-definition-source-and-channel-generation.md)）。
+- **三条通道共用同一份真源**：`src/tools/definitions.ts` → Pi 工具 / VCP 命令 / CLI 子命令（详见 [ADR-0001](./docs/adr/0001-single-tool-definition-source-and-channel-generation.md)）。
 
 ## 安装与使用
 
@@ -17,12 +17,12 @@
 
 安装后在 Pi 中 `/reload`，可用：
 
-- 30 个工具，名称形如 `siyuan_notebook_list`、`siyuan_block_append`；
+- 45 个工具，名称形如 `siyuan_notebook_list`、`siyuan_block_append`；
 - skill `/skill:siyuan`（含命令表与写操作纪律）。
 
 ### 2. 作为 VCP 插件（VCPToolBox）
 
-两种安装方式（详见 [`plugins/siyuan-agent/README.md`](../plugins/siyuan-agent/README.md)）：
+两种安装方式（详见 [`plugins/siyuan-agent/README.md`](./plugins/siyuan-agent/README.md)）：
 
 1. **插件商店 registry 源**：把本仓库 `plugins.json` 的地址加入 `pluginStoreSources.json`。**用 ghproxy 前缀**（已实测：直连 `raw.githubusercontent.com` 在本机网络不通，加前缀返回 200，且与 VCPDeck / VCPPlugins 的 `downloadUrl` 惯例一致）：
 
@@ -89,7 +89,7 @@ REPL 支持全部 CLI 子命令（含 `--json` 与 `--confirm`），并把会话
 
 ## 安全边界（写操作必读）
 
-见 [ADR-0004：写通道与统一确认安全边界](./adr/0004-write-channel-and-unified-confirmation-boundary.md)。
+见 [ADR-0004：写通道与统一确认安全边界](./docs/adr/0004-write-channel-and-unified-confirmation-boundary.md)。
 
 - **增量型写工具**（`notebook_create` / `notebook_open` / `notebook_close` / `doc_create` / `daily_note_create` / `block_append` / `block_prepend` / `block_insert` / `block_fold` / `block_unfold` / `block_attrs_set` / `export_resources`）可直接调用。
 - **破坏型写工具**（`block_update` / `block_delete` / `block_move` / `doc_rename` / `doc_move` / `doc_remove` / `doc_rename_by_path` / `doc_remove_by_path` / `doc_move_by_path` / `notebook_rename` / `notebook_icon_set` / `notebook_conf_set` / `notebook_remove` / `find_replace`）**必须显式传 `confirm: true`**；不传时只返回**预览**并拒绝执行（`SIYUAN_CONFIRM_REQUIRED`）。其中 `notebook_remove`（删整库）还须传 `confirmName` 且与笔记本当前名称逐字一致（`SIYUAN_CONFIRM_MISMATCH`）；`find_replace` 的 `ids` 不允许为空（禁止全库替换）。
@@ -130,6 +130,7 @@ plugins/siyuan-agent/  VCP 制品（plugin-manifest.json、index.cjs）
 docs/adr/          架构决策记录
 ```
 
-## 二期路线
+## 尚未实现（下一步候选）
 
-`notebook_open` / `notebook_close`、多实例 profile、`notebook_remove` / `notebook_rename`、`find_replace`、资产上传、块 fold/unfold、Pi 侧 `tool_call` UI 二次确认。
+多实例 profile（一个进程连多个思源内核）、资产上传、Pi 侧 `tool_call` UI 二次确认。
+一期规划里的 `notebook_open` / `notebook_close` / `notebook_remove` / `notebook_rename` / `find_replace` / 块 fold-unfold 均已在 45 条工具内落地。
