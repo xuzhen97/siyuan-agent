@@ -7,6 +7,7 @@ const READ_ONLY_NAMES = [
   "status",
   "notebook_list",
   "notebook_info",
+  "notebook_conf_get",
   "doc_list",
   "doc_tree",
   "doc_path_by_id",
@@ -23,7 +24,7 @@ const READ_ONLY_NAMES = [
   "sql",
 ];
 
-describe("TOOL_SPECS 只读部分（18 条）", () => {
+describe("TOOL_SPECS 只读部分（19 条）", () => {
   it("名称与顺序完全匹配，且全部标记为 read", () => {
     const readOnly = TOOL_SPECS.filter((s) => s.risk === "read");
     expect(readOnly.map((s) => s.name)).toEqual(READ_ONLY_NAMES);

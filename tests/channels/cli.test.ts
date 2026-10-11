@@ -159,11 +159,11 @@ describe("CLI 制品端到端（真实进程退出码，由 pnpm build:cli 生�
 });
 
 describe("usage", () => {
-  it("列出全部 30 条工具的命令路径", () => {
+  it("列出全部 32 条工具的命令路径", () => {
     const text = usage();
     expect(text).toContain("siyuan-agent notebook list");
     expect(text).toContain("siyuan-agent sql");
     expect(text).toContain("siyuan-agent block delete");
-    expect(text.split("\n").filter((line) => line.startsWith("siyuan-agent "))).toHaveLength(30);
+    expect(text.split("\n").filter((line) => line.startsWith("siyuan-agent "))).toHaveLength(32);
   });
 });

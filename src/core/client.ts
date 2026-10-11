@@ -150,6 +150,26 @@ export class SiYuanClient {
     );
   }
 
+  /** 真实响应：data = { box, name, conf: {...} }（官方 API 文档 + 本机实测）。 */
+  getNotebookConf(notebook: string): Promise<{ box: string; name: string; conf: Record<string, unknown> }> {
+    return this.call<{ box?: string; name?: string; conf?: Record<string, unknown> }>(
+      "/api/notebook/getNotebookConf",
+      { notebook },
+    ).then((d) => ({ box: d?.box ?? notebook, name: d?.name ?? "", conf: d?.conf ?? {} }));
+  }
+
+  /**
+   * 创建「今天」的日记。内核按笔记本的 dailyNoteSavePath 模板落盘；
+   * 若今日日记已存在则返回**既有文档 ID**且不重复推送（天然幂等）。
+   * 真实响应：data = { id }（kernel/api/filetree.go::createDailyNote）。
+   */
+  async createDailyNote(notebook: string, app?: string): Promise<string> {
+    const body: Record<string, unknown> = { notebook };
+    if (app) body.app = app;
+    const data = await this.call<{ id?: string }>("/api/filetree/createDailyNote", body);
+    return data?.id ?? "";
+  }
+
   // ── filetree / export / search（Task 4）────────────────────────────
 
   listDocsByPath(notebook: string, path: string): Promise<DocEntry[]> {

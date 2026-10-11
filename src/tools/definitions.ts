@@ -84,6 +84,29 @@ const readOnlyTools: readonly ToolSpec[] = [
     },
   },
   {
+    name: "notebook_conf_get",
+    title: "笔记本配置",
+    description:
+      "读取笔记本配置：名称、图标、是否已关闭、引用/新建文档的保存路径、日记保存路径与模板路径等。" +
+      "要写日记前可用它确认 dailyNoteSavePath。",
+    risk: "read",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const { box, name, conf } = await client.getNotebookConf(String(args.notebook));
+      // conf 字段很多，文本只展示定位与日记相关项；全量仍在 data.conf（Spec §5.1）
+      const picked = {
+        name: conf.name ?? name,
+        icon: conf.icon,
+        closed: conf.closed,
+        refCreateSavePath: conf.refCreateSavePath,
+        docCreateSavePath: conf.docCreateSavePath,
+        dailyNoteSavePath: conf.dailyNoteSavePath,
+        dailyNoteTemplatePath: conf.dailyNoteTemplatePath,
+      };
+      return { text: `${renderText(picked)}\n\n（全量配置见 data.conf）`, data: { box, name, conf } };
+    },
+  },
+  {
     name: "doc_list",
     title: "列出文档",
     description: "列出指定笔记本路径下的直接子文档与子目录（不递归）。",
@@ -384,6 +407,24 @@ const additiveTools: readonly ToolSpec[] = [
         String(args.markdown ?? ""),
       );
       return { text: `已创建文档：${id}\n路径：${String(args.path)}`, data: { id, notebook: args.notebook, path: args.path } };
+    },
+  },
+  {
+    name: "daily_note_create",
+    title: "创建今日日记",
+    description:
+      "在指定笔记本中创建「今天」的日记文档并返回其 ID（按该笔记本的 dailyNoteSavePath 模板落盘）。" +
+      "若今天的日记已存在，内核返回既有文档 ID 且不重复创建（天然幂等）。",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const id = await client.createDailyNote(String(args.notebook));
+      return {
+        text:
+          `日记文档：${id || "(内核未返回 ID)"}\n` +
+          "提示：用 doc_hpath_by_id 解析其人类可读路径，或用 block_append（parentID 传该 ID）追加内容。",
+        data: { id },
+      };
     },
   },
   {

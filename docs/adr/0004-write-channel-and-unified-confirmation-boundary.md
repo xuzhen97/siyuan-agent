@@ -33,7 +33,7 @@ ADR-0002 把一期定为只读。实施开始后主人指出真实需求包含"�
 5. **三通道统一只用 `confirm` 参数**作为确认机制，不引入通道差异化确认（Pi 侧 UI 二次确认、CLI `--yes` 等一律不做）。依据是 VCP 无交互能力且 `requiresAdmin` 只能插件级（背景第 9 条），差异化会让同一真源在三条通道语义分叉。
 6. **SQL 继续只读**：ADR-0002 的客户端守卫（单条 `SELECT`/`WITH`）继续适用，不提供任何 SQL 写开关。理由：内核不限制语句语义，任意 SQL 写没有确认机制、没有 `doOperations` 级别的可核对性，也没有回滚语义。
 7. 写工具把内核返回的 `doOperations` 作为"实际发生了什么"的证据回传，并提示是否带回 `undoOperations`。
-8. 明确排除：`notebook_remove`（整库删除）、`notebook_rename`、`set_notebook_icon`、`setNotebookConf`、`find_replace`（批量替换，且官方文档未收录该端点）、`asset upload`、`export_resources`、块 fold/unfold、`notebook_open`/`notebook_close`。
+8. 明确排除：`notebook_remove`（整库删除）、`notebook_rename`、`set_notebook_icon`、`setNotebookConf`、`find_replace`（批量替换，且官方文档未收录该端点）、`asset upload`、`export_resources`、块 fold/unfold、`notebook_open`/`notebook_close`；以及**按路径的 `renameDoc` / `removeDoc` / `moveDocs`**（与 `…ByID` 变体功能重叠，多一套路径参数只会增加误用面，故有意不实现）。
 9. 记录但不依赖内核侧的第二道保险：主人可用只读模式启动内核或使用只读角色 Token，此时写入由内核拒绝。
 
 ## 候选方案

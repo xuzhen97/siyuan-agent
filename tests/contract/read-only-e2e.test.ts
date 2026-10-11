@@ -79,4 +79,17 @@ describe.skipIf(!enabled)("只读契约（真实内核，SIYUAN_E2E=1）", () =>
     },
     TIMEOUT,
   );
+
+  it(
+    "notebook_conf_get 返回 box/name/conf 且含日记保存路径",
+    async () => {
+      const notebooks = await callTool("notebook_list", {}, client);
+      const first = (notebooks.data as Array<{ id: string }>)[0];
+      if (!first) return;
+      const result = await callTool("notebook_conf_get", { notebook: first.id }, client);
+      expect(result.text).toContain("dailyNoteSavePath");
+      expect((result.data as { conf?: unknown }).conf).toBeTruthy();
+    },
+    TIMEOUT,
+  );
 });

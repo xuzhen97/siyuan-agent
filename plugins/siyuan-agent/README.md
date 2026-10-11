@@ -3,7 +3,7 @@
 通过思源（SiYuan）内核 HTTP API 读写知识库的 VCP 插件（synchronous / stdio，**零 npm 依赖**）。
 
 - 产物：`plugin-manifest.json` + `index.cjs`（esbuild 单文件，除 `node:` 内置外无 external）
-- 工具数：**30** 条（只读 18 + 写 12）
+- 工具数：**32** 条（只读 19 + 写 13）
 - 来源真源：仓库 `src/tools/definitions.ts`；`plugin-manifest.json` 由 `pnpm generate` 生成，**不要手改**
 
 ## 安装方式
@@ -50,8 +50,8 @@ subpath: plugins/siyuan-agent
 
 ## 工具与安全边界
 
-- **只读（18 条）**：笔记本/文档树/块/检索/标签/`sql`（仅单条 `SELECT`/`WITH`）/`version`/`status`。
-- **增量型写（6 条）**：`notebook_create`、`doc_create`、`block_append`、`block_prepend`、`block_insert`、`block_attrs_set`（属性名必须 `custom-` 前缀）。
+- **只读（19 条）**：笔记本/笔记本配置/文档树/块/检索/标签/`sql`（仅单条 `SELECT`/`WITH`）/`version`/`status`。
+- **增量型写（7 条）**：`notebook_create`、`doc_create`、`daily_note_create`、`block_append`、`block_prepend`、`block_insert`、`block_attrs_set`（属性名必须 `custom-` 前缀）。
 - **破坏型写（6 条）**：`block_update`、`block_delete`、`block_move`、`doc_rename`、`doc_move`、`doc_remove`。
   - **必须显式传 `confirm: true`**；不传（或传 `false`）时只返回**预览**并拒绝执行，错误码 `SIYUAN_CONFIRM_REQUIRED`。
   - 可选 `dryRun: true` 只预览不写；`block_update`/`block_delete` 支持 `expectedHash` 做乐观并发校验（不匹配报 `SIYUAN_STALE_TARGET`）。

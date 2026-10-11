@@ -49,9 +49,9 @@ describe("buildVcpManifestJson", () => {
     ]);
   });
 
-  it("invocationCommands 覆盖全部 30 条且命令名为 PascalCase", () => {
+  it("invocationCommands 覆盖全部 32 条且命令名为 PascalCase", () => {
     const commands = parsed.capabilities.invocationCommands.map((c) => c.command);
-    expect(commands).toHaveLength(30);
+    expect(commands).toHaveLength(32);
     expect(commands).toContain("NotebookList");
     expect(commands).toContain("Sql");
     expect(commands).toContain("BlockAppend");

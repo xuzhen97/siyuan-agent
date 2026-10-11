@@ -24,6 +24,7 @@ const WRITE_METHODS = [
 const ADDITIVE = [
   "notebook_create",
   "doc_create",
+  "daily_note_create",
   "block_append",
   "block_prepend",
   "block_insert",
@@ -49,8 +50,8 @@ const invoke = (name: string) => (client: SiYuanClient, args: Record<string, unk
 const writeCalls = (calls: FakeCall[]) => calls.filter((c) => WRITE_METHODS.includes(c.fn));
 
 describe("写工具清单与风险级（ADR-0004）", () => {
-  it("总数为 30，增量型 6 条、破坏型 6 条，名称正确", () => {
-    expect(TOOL_SPECS).toHaveLength(30);
+  it("总数为 32，增量型 7 条、破坏型 6 条，名称正确", () => {
+    expect(TOOL_SPECS).toHaveLength(32);
     expect(TOOL_SPECS.filter((s) => s.risk === "additive").map((s) => s.name)).toEqual(ADDITIVE);
     expect(TOOL_SPECS.filter((s) => s.risk === "destructive").map((s) => s.name)).toEqual(DESTRUCTIVE);
   });

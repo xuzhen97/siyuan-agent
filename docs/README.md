@@ -2,7 +2,7 @@
 
 把思源（SiYuan）笔记知识库接入 Agent 与终端的基础项目：**一份工具定义真源，三条消费通道**。
 
-- **30 条工具**（只读 18 + 写 12），覆盖笔记本、文档树、块 kramdown、全文检索、标签、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块。
+- **32 条工具**（只读 19 + 写 13），覆盖笔记本（含配置读取）、文档树、块 kramdown、全文检索、标签、SQL 查询、Markdown 导出、日记，以及写入/修改/删除笔记与块。
 - **零运行时依赖**：只用 Node 内置能力（原生 `fetch`、`node:` 模块）。
 - **三条通道共用同一份真源**：`src/tools/definitions.ts` → Pi 工具 / VCP 命令 / CLI 子命令（详见 [ADR-0001](./adr/0001-single-tool-definition-source-and-channel-generation.md)）。
 
@@ -64,7 +64,7 @@ node dist/cli.cjs block delete <块ID> --confirm # 确认后执行
 
 见 [ADR-0004：写通道与统一确认安全边界](./adr/0004-write-channel-and-unified-confirmation-boundary.md)。
 
-- **增量型写工具**（`notebook_create` / `doc_create` / `block_append` / `block_prepend` / `block_insert` / `block_attrs_set`）可直接调用。
+- **增量型写工具**（`notebook_create` / `doc_create` / `daily_note_create` / `block_append` / `block_prepend` / `block_insert` / `block_attrs_set`）可直接调用。
 - **破坏型写工具**（`block_update` / `block_delete` / `block_move` / `doc_rename` / `doc_move` / `doc_remove`）**必须显式传 `confirm: true`**；不传时只返回**预览**并拒绝执行（`SIYUAN_CONFIRM_REQUIRED`）。
 - 可选 `dryRun: true` 只预览不写；`block_update` / `block_delete` 支持 `expectedHash` 做乐观并发校验（不匹配报 `SIYUAN_STALE_TARGET`）；`block_update` 默认 `lockType: true`（块类型变化即拒绝）。
 - **SQL 永远只读**：仅单条 `SELECT` / `WITH`，其余一律拦为 `SIYUAN_READONLY_BLOCKED`。

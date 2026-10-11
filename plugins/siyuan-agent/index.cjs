@@ -152,6 +152,24 @@ var SiYuanClient = class _SiYuanClient {
       (d) => d?.boxInfo ?? {}
     );
   }
+  /** 真实响应：data = { box, name, conf: {...} }（官方 API 文档 + 本机实测）。 */
+  getNotebookConf(notebook) {
+    return this.call(
+      "/api/notebook/getNotebookConf",
+      { notebook }
+    ).then((d) => ({ box: d?.box ?? notebook, name: d?.name ?? "", conf: d?.conf ?? {} }));
+  }
+  /**
+   * 创建「今天」的日记。内核按笔记本的 dailyNoteSavePath 模板落盘；
+   * 若今日日记已存在则返回**既有文档 ID**且不重复推送（天然幂等）。
+   * 真实响应：data = { id }（kernel/api/filetree.go::createDailyNote）。
+   */
+  async createDailyNote(notebook, app) {
+    const body = { notebook };
+    if (app) body.app = app;
+    const data = await this.call("/api/filetree/createDailyNote", body);
+    return data?.id ?? "";
+  }
   // ── filetree / export / search（Task 4）────────────────────────────
   listDocsByPath(notebook, path) {
     return this.call("/api/filetree/listDocsByPath", {
@@ -646,6 +664,28 @@ var readOnlyTools = [
     }
   },
   {
+    name: "notebook_conf_get",
+    title: "\u7B14\u8BB0\u672C\u914D\u7F6E",
+    description: "\u8BFB\u53D6\u7B14\u8BB0\u672C\u914D\u7F6E\uFF1A\u540D\u79F0\u3001\u56FE\u6807\u3001\u662F\u5426\u5DF2\u5173\u95ED\u3001\u5F15\u7528/\u65B0\u5EFA\u6587\u6863\u7684\u4FDD\u5B58\u8DEF\u5F84\u3001\u65E5\u8BB0\u4FDD\u5B58\u8DEF\u5F84\u4E0E\u6A21\u677F\u8DEF\u5F84\u7B49\u3002\u8981\u5199\u65E5\u8BB0\u524D\u53EF\u7528\u5B83\u786E\u8BA4 dailyNoteSavePath\u3002",
+    risk: "read",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const { box, name, conf } = await client.getNotebookConf(String(args.notebook));
+      const picked = {
+        name: conf.name ?? name,
+        icon: conf.icon,
+        closed: conf.closed,
+        refCreateSavePath: conf.refCreateSavePath,
+        docCreateSavePath: conf.docCreateSavePath,
+        dailyNoteSavePath: conf.dailyNoteSavePath,
+        dailyNoteTemplatePath: conf.dailyNoteTemplatePath
+      };
+      return { text: `${renderText(picked)}
+
+\uFF08\u5168\u91CF\u914D\u7F6E\u89C1 data.conf\uFF09`, data: { box, name, conf } };
+    }
+  },
+  {
     name: "doc_list",
     title: "\u5217\u51FA\u6587\u6863",
     description: "\u5217\u51FA\u6307\u5B9A\u7B14\u8BB0\u672C\u8DEF\u5F84\u4E0B\u7684\u76F4\u63A5\u5B50\u6587\u6863\u4E0E\u5B50\u76EE\u5F55\uFF08\u4E0D\u9012\u5F52\uFF09\u3002",
@@ -938,6 +978,21 @@ var additiveTools = [
       );
       return { text: `\u5DF2\u521B\u5EFA\u6587\u6863\uFF1A${id}
 \u8DEF\u5F84\uFF1A${String(args.path)}`, data: { id, notebook: args.notebook, path: args.path } };
+    }
+  },
+  {
+    name: "daily_note_create",
+    title: "\u521B\u5EFA\u4ECA\u65E5\u65E5\u8BB0",
+    description: "\u5728\u6307\u5B9A\u7B14\u8BB0\u672C\u4E2D\u521B\u5EFA\u300C\u4ECA\u5929\u300D\u7684\u65E5\u8BB0\u6587\u6863\u5E76\u8FD4\u56DE\u5176 ID\uFF08\u6309\u8BE5\u7B14\u8BB0\u672C\u7684 dailyNoteSavePath \u6A21\u677F\u843D\u76D8\uFF09\u3002\u82E5\u4ECA\u5929\u7684\u65E5\u8BB0\u5DF2\u5B58\u5728\uFF0C\u5185\u6838\u8FD4\u56DE\u65E2\u6709\u6587\u6863 ID \u4E14\u4E0D\u91CD\u590D\u521B\u5EFA\uFF08\u5929\u7136\u5E42\u7B49\uFF09\u3002",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const id = await client.createDailyNote(String(args.notebook));
+      return {
+        text: `\u65E5\u8BB0\u6587\u6863\uFF1A${id || "(\u5185\u6838\u672A\u8FD4\u56DE ID)"}
+\u63D0\u793A\uFF1A\u7528 doc_hpath_by_id \u89E3\u6790\u5176\u4EBA\u7C7B\u53EF\u8BFB\u8DEF\u5F84\uFF0C\u6216\u7528 block_append\uFF08parentID \u4F20\u8BE5 ID\uFF09\u8FFD\u52A0\u5185\u5BB9\u3002`,
+        data: { id }
+      };
     }
   },
   {

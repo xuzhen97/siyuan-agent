@@ -3,7 +3,7 @@
   "name": "SiYuanAgent",
   "displayName": "思源笔记读写桥",
   "version": "0.1.0",
-  "description": "读写思源（SiYuan）笔记知识库：笔记本、文档树、块内容、全文检索、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块（破坏型操作强制 confirm 确认）。30 条工具，同步 stdio 架构，零 npm 依赖。",
+  "description": "读写思源（SiYuan）笔记知识库：笔记本、文档树、块内容、全文检索、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块（破坏型操作强制 confirm 确认）。32 条工具，同步 stdio 架构，零 npm 依赖。",
   "author": "xuzhen97",
   "pluginType": "synchronous",
   "entryPoint": {
@@ -57,6 +57,11 @@
         "command": "NotebookInfo",
         "description": "功能: 获取指定笔记本的配置与统计信息。\n风险: 只读\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n`command` 固定为 NotebookInfo，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookInfo「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookInfo「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookConfGet",
+        "description": "功能: 读取笔记本配置：名称、图标、是否已关闭、引用/新建文档的保存路径、日记保存路径与模板路径等。要写日记前可用它确认 dailyNoteSavePath。\n风险: 只读\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n`command` 固定为 NotebookConfGet，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookConfGet「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookConfGet「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
         "command": "DocList",
@@ -137,6 +142,11 @@
         "command": "DocCreate",
         "description": "功能: 在指定笔记本中按人读路径创建文档并写入 Markdown。同 path 重复调用不会覆盖已有文档（幂等）。\n风险: 增量型（只增不改）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (必填) 人读路径，需以 / 开头，如 /沙盒/甲\n- markdown: (可选) GFM Markdown 内容\n`command` 固定为 DocCreate，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocCreate「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\nmarkdown:「始」值「末」\n<<<[END_TOOL_REQUEST]>>>",
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocCreate「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\nmarkdown:「始」值「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DailyNoteCreate",
+        "description": "功能: 在指定笔记本中创建「今天」的日记文档并返回其 ID（按该笔记本的 dailyNoteSavePath 模板落盘）。若今天的日记已存在，内核返回既有文档 ID 且不重复创建（天然幂等）。\n风险: 增量型（只增不改）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n`command` 固定为 DailyNoteCreate，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DailyNoteCreate「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DailyNoteCreate「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
         "command": "BlockAppend",

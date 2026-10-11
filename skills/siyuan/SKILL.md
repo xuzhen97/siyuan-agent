@@ -63,6 +63,7 @@ compatibility: 需要本机或可访问的思源内核在运行（默认 http://
 | `status` | `Status` | — | 连接状态 |
 | `notebook_list` | `NotebookList` | — | 列出笔记本 |
 | `notebook_info` | `NotebookInfo` | notebook | 笔记本信息 |
+| `notebook_conf_get` | `NotebookConfGet` | notebook | 笔记本配置 |
 | `doc_list` | `DocList` | notebook, path? | 列出文档 |
 | `doc_tree` | `DocTree` | notebook, path, depth?, sort? | 文档子树 |
 | `doc_path_by_id` | `DocPathById` | id | 文档存储路径 |
@@ -79,6 +80,7 @@ compatibility: 需要本机或可访问的思源内核在运行（默认 http://
 | `sql` | `Sql` | stmt | SQL 查询（只读） |
 | `notebook_create` | `NotebookCreate` | name | 创建笔记本 |
 | `doc_create` | `DocCreate` | notebook, path, markdown? | 创建文档 |
+| `daily_note_create` | `DailyNoteCreate` | notebook | 创建今日日记 |
 | `block_append` | `BlockAppend` | parentID, data, dataType? | 追加块 |
 | `block_prepend` | `BlockPrepend` | parentID, data, dataType? | 前置块 |
 | `block_insert` | `BlockInsert` | data, dataType?, parentID?, previousID?, nextID? | 插入块 |

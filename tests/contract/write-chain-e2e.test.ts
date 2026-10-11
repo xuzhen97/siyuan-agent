@@ -59,6 +59,21 @@ describe.skipIf(!enabled)("写链路契约（真实内核，SIYUAN_E2E_WRITE=1�
       // 7. 删除文档（破坏型：内核会先写入数据历史）
       const removed = await callTool("doc_remove", { id: docId, confirm: true }, client);
       expect(removed.text).toContain("数据历史");
+
+      // 8. 笔记本配置（只读，顺带确认沙盒的日记保存路径）
+      const conf = await callTool("notebook_conf_get", { notebook: notebookId }, client);
+      expect(conf.text).toContain("dailyNoteSavePath");
+
+      // 9. 日记：创建今日日记，验证幂等（同日重复调用返回同一文档），随后清理
+      const daily1 = await callTool("daily_note_create", { notebook: notebookId }, client);
+      const dailyId = String((daily1.data as { id?: string })?.id ?? "");
+      expect(dailyId.length).toBeGreaterThan(0);
+
+      const daily2 = await callTool("daily_note_create", { notebook: notebookId }, client);
+      expect(String((daily2.data as { id?: string })?.id ?? "")).toBe(dailyId);
+
+      const cleaned = await callTool("doc_remove", { id: dailyId, confirm: true }, client);
+      expect(cleaned.text).toContain("数据历史");
     },
     TIMEOUT,
   );
