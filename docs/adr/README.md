@@ -65,3 +65,4 @@ ADR 记录会长期影响系统结构、数据、协议、安全或运维的决�
 | [0002](./0002-read-only-boundary-and-client-side-sql-guard.md) | Superseded by ADR-0004（其 SQL 守卫与 `truncated` 保真两条继续有效） | 一期只读边界与客户端 SQL 守卫 |
 | [0003](./0003-zero-runtime-dependency-and-committed-artifacts.md) | Accepted | 零运行时依赖、Node ≥20 与制品提交进仓库 |
 | [0004](./0004-write-channel-and-unified-confirmation-boundary.md) | Accepted | 写通道与统一 `confirm` 确认安全边界（取代 0002 的只读结论） |
+| [0005](./0005-dsh-as-fourth-consumption-surface.md) | Accepted | DSH 作为第四消费面：技能 provider + CLI，零安装脚本可 GitHub 安装 |
