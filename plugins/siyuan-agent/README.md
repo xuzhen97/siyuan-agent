@@ -16,11 +16,14 @@
 {
   "id": "src_siyuan_agent",
   "name": "siyuan-agent",
-  "url": "https://raw.githubusercontent.com/xuzhen97/siyuan-agent/main/plugins.json",
+  "url": "https://ghproxy.net/https://raw.githubusercontent.com/xuzhen97/siyuan-agent/main/plugins.json",
   "type": "registry",
   "builtin": false
 }
 ```
+
+> 已实测：直连 `raw.githubusercontent.com` 在本机网络返回 HTTP 000（不通），而加上 `ghproxy.net/` 前缀返回 HTTP 200。
+> 若你的网络能直连 GitHub，也可去掉前缀写成 `https://raw.githubusercontent.com/xuzhen97/siyuan-agent/main/plugins.json`。
 
 之后在 AdminPanel 的插件中心即可看到「思源笔记读写桥」并一键安装/更新。
 

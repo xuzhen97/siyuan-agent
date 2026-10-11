@@ -24,7 +24,11 @@
 
 两种安装方式（详见 [`plugins/siyuan-agent/README.md`](../plugins/siyuan-agent/README.md)）：
 
-1. **插件商店 registry 源**：把本仓库 `plugins.json` 的 raw 地址加入 `pluginStoreSources.json`；
+1. **插件商店 registry 源**：把本仓库 `plugins.json` 的地址加入 `pluginStoreSources.json`。**用 ghproxy 前缀**（已实测：直连 `raw.githubusercontent.com` 在本机网络不通，加前缀返回 200，且与 VCPDeck / VCPPlugins 的 `downloadUrl` 惯例一致）：
+
+   ```text
+   https://ghproxy.net/https://raw.githubusercontent.com/xuzhen97/siyuan-agent/main/plugins.json
+   ```
 2. **插件中心按 GitHub 仓库安装**：仓库 `xuzhen97/siyuan-agent` + subpath `plugins/siyuan-agent`。
 
 插件为 synchronous / stdio，制品 `plugins/siyuan-agent/index.cjs` 为零依赖单文件。
