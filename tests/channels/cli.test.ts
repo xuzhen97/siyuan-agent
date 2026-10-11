@@ -62,6 +62,12 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["block", "insert", "x", "--dataType", "dom"]).args.dataType).toBe("dom");
   });
 
+  it("参考实现的 --md 等价于 --markdown（回归：曾静默丢弃内容、建出空文档）", () => {
+    const parsed = parseCliArgs(["doc", "create", "nb1", "/x", "--md", "# 甲"]);
+    expect(parsed.tool).toBe("doc_create");
+    expect(parsed.args.markdown).toBe("# 甲");
+  });
+
   it("布尔旗标只需出现即为 true，也接受显式 false", () => {
     expect(parseCliArgs(["block", "delete", "b1", "--confirm"]).args.confirm).toBe(true);
     expect(parseCliArgs(["block", "delete", "b1", "--confirm", "false"]).args.confirm).toBe(false);

@@ -29,6 +29,14 @@ describe("applyReplAliases（参考实现 REPL 语法兼容层）", () => {
     expect(applyReplAliases(["doc", "get", "d1"])).toEqual(["doc", "path_by_id", "d1"]);
   });
 
+  it("doc export <doc-id> → doc export_md <doc-id>（参考实现的另一种写法）", () => {
+    expect(applyReplAliases(["doc", "export", "d1"])).toEqual(["doc", "export_md", "d1"]);
+  });
+
+  it("block child <id> → block children <id>（参考实现用单数）", () => {
+    expect(applyReplAliases(["block", "child", "b1"])).toEqual(["block", "children", "b1"]);
+  });
+
   it("block insert <parent> <data> → insert <data> --parentID <parent>（本项目参数顺序不同）", () => {
     expect(applyReplAliases(["block", "insert", "b1", "新内容"])).toEqual([
       "block",
@@ -92,5 +100,12 @@ describe("REPL 内的别名与拼接真的生效", () => {
     const { calls, out } = await run(["export md d1", "quit"], ".tmp/repl-alias-state");
     expect(calls.some((call) => call.fn === "exportMdContent")).toBe(true);
     expect(out).toContain("# 甲");
+  });
+
+  it("doc export <id> 与 block child <id> 也能跑通（参考实现的写法）", async () => {
+    const { calls, out } = await run(["doc export d1", "block child b1", "quit"], ".tmp/repl-alias-state");
+    expect(calls.some((call) => call.fn === "exportMdContent")).toBe(true);
+    expect(calls.some((call) => call.fn === "getChildBlocks")).toBe(true);
+    expect(out).not.toContain("未知命令");
   });
 });

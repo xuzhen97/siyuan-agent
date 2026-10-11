@@ -51,8 +51,10 @@ function promptLabel(state: SessionState): string {
  * 参考实现 REPL 的语法兼容层：让参考实现的命令写法在本 REPL 里也能用。
  * - `search <query>` → `search blocks <query>`（参考实现的 search 就是全文搜块）
  * - `export md <doc-id>` → `doc export_md <doc-id>`
+ * - `doc export <doc-id>` → `doc export_md <doc-id>`（参考实现的另一种写法）
  * - `doc get <id>` → `doc path_by_id <id>`
  * - `block insert <parent> <data>` → 本项目参数顺序是 `insert <data> --parentID <id>`
+ * - `block child <id>` → `block children <id>`（参考实现的单数写法）
  * - `--md <content>` → 本项目写作 `--markdown <content>`
  * - `sql ...` / `search ...`：把剩余 token 拼回参数（对齐参考实现的 " ".join(parts[1:])，REPL 里不必加引号）
  */
@@ -73,6 +75,12 @@ export function applyReplAliases(argv: string[]): string[] {
   }
   if (first === "doc" && second === "get") {
     return ["doc", "path_by_id", ...argv.slice(2)];
+  }
+  if (first === "doc" && second === "export") {
+    return ["doc", "export_md", ...argv.slice(2)];
+  }
+  if (first === "block" && second === "child") {
+    return ["block", "children", ...argv.slice(2)];
   }
   if (first === "block" && second === "insert" && argv.length >= 4) {
     // 本项目参数名是 parentID（选项名归一化后为 parentid）

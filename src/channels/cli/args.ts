@@ -19,12 +19,16 @@ const GLOBAL_VALUE_OPTIONS = new Set(["host", "port", "token", "config"]);
 /**
  * 选项名兼容别名：参数名与内核真实字段一致（parentID/previousID/nextID），
  * 但参考实现用的是 --parent / --previous / --next，两种写法都收。
+ *
+ * `md` → `markdown`：参考实现写的是 `doc create … --md`。不做别名时 `md` 与任何
+ * 参数名都不匹配，会被**静默丢弃**（不报错、内容为空）——静默丢内容比报错更危险。
  * （--data-type 无需别名：归一化后与 --dataType 等价）
  */
 const PARAM_ALIASES: Record<string, string> = {
   parent: "parentid",
   previous: "previousid",
   next: "nextid",
+  md: "markdown",
 };
 
 /** 选项名归一化：忽略大小写与连字符（--dry-run 与 --dryRun 等价）。 */

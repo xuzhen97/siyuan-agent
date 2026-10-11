@@ -1825,7 +1825,8 @@ var GLOBAL_VALUE_OPTIONS = /* @__PURE__ */ new Set(["host", "port", "token", "co
 var PARAM_ALIASES = {
   parent: "parentid",
   previous: "previousid",
-  next: "nextid"
+  next: "nextid",
+  md: "markdown"
 };
 function normalizeKey(key) {
   return key.toLowerCase().replace(/-/g, "");
@@ -2164,6 +2165,12 @@ function applyReplAliases(argv) {
   }
   if (first === "doc" && second === "get") {
     return ["doc", "path_by_id", ...argv.slice(2)];
+  }
+  if (first === "doc" && second === "export") {
+    return ["doc", "export_md", ...argv.slice(2)];
+  }
+  if (first === "block" && second === "child") {
+    return ["block", "children", ...argv.slice(2)];
   }
   if (first === "block" && second === "insert" && argv.length >= 4) {
     return ["block", "insert", argv[3], "--parentID", argv[2], ...argv.slice(4)];
