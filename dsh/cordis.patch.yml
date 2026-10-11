@@ -1,0 +1,9 @@
+# siyuan-agent 的 DSH 接入（ADR-0005）。
+#
+# 纯 Host bundle：不安装任何依赖、不带安装脚本 —— 因此 `dsh plugin add` 不会触发
+# pnpm 的 allowBuilds 拦截，也不需要 commit 绑定的放行 key。
+# 插件的职责只是把包内的 skills/siyuan/SKILL.md 注册成技能，并在正文后注入 CLI 的
+# 本机绝对路径（见 dsh/index.mjs），所以这里不写任何路径。
+- insert:
+    - id: siyuan-agent-skills
+      name: siyuan-agent/dsh

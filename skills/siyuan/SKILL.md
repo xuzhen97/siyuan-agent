@@ -55,6 +55,21 @@ compatibility: 需要本机或可访问的思源内核在运行（默认 http://
 - **长内容用 stdin**：CLI 下参数写 `-` 即从标准输入读（`doc create … --markdown -`；`block insert`/`block update` 的 data 为 `-` 或省略）。REPL 内不支持 `-`（会吞掉会话输入），改写 `--markdown "文本"`。
 - **Windows Git Bash**：以 `/` 开头的参数会被 MSYS 改写成 Windows 路径（例如 `/2026…sy` 变成 `C:\Program Files\Git\…`），传给 `doc_tree` 会得到内核报错。在 Git Bash 下优先用**文档 ID** 而不是带 `/` 的路径（或设 `MSYS_NO_PATHCONV=1`）。
 
+## 在 DSH（DeepSeek Harness）里使用
+
+同一份技能既供 Pi 直接读取，也供 DSH 使用。DSH 侧没有原生工具，调用走随包发布的 CLI 制品：
+
+```bash
+node "<本包>/dist/cli.cjs" notebook list --json
+node "<本包>/dist/cli.cjs" sql "SELECT id, hpath FROM blocks WHERE type = 'd' LIMIT 20" --json
+node "<本包>/dist/cli.cjs" block delete <块ID> --confirm     # 破坏型仍需 confirm
+```
+
+- **路径**：DSH 插件（`dsh/index.mjs`，ADR-0005）会在加载时把本机 CLI 的绝对路径追加到本技能正文末尾的「已安装的 siyuan-agent CLI（DSH 侧）」一节，照那里给出的路径调用即可。Pi 侧直接读本文件，包内路径为 `<包根>/dist/cli.cjs`。
+- **纪律完全相同**：先读后写、破坏型必须 `--confirm`、SQL 仅单条 `SELECT`/`WITH`、看到截断提示要分页——CLI 与 Pi/VCP 共用同一份工具真源（`src/tools/definitions.ts`），行为一致。
+- **脚本里总是带完整子命令与 `--json`**：不带参数或写 `repl` 会进交互式 REPL，管道/CI 下则只打印用法。
+- 连接配置仍是 `SIYUAN_HOST` / `SIYUAN_PORT` / `SIYUAN_TOKEN` 环境变量或 `~/.siyuan-agent/config.json`。
+
 ## 命令表
 
 <!-- BEGIN GENERATED -->

@@ -8,7 +8,16 @@
   "packageManager": "pnpm@11.21.0",
   "engines": { "node": ">=20" },
   "bin": { "siyuan-agent": "dist/cli.cjs" },
-  "files": ["extensions/", "skills/", "src/", "dist/", "README.md", "LICENSE"],
+  "exports": {
+    ".": "./dsh/index.mjs",
+    "./dsh": "./dsh/index.mjs",
+    "./extensions/*": "./extensions/*",
+    "./skills/*": "./skills/*",
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["dsh/", "extensions/", "skills/", "src/", "dist/", "README.md", "LICENSE"],
+  "dsh": { "bundle": { "patch": "./dsh/cordis.patch.yml" } },
   "pi": {
     "extensions": ["./extensions/index.ts"],
     "skills": ["./skills"]
@@ -22,6 +31,7 @@
     "build:cli": "esbuild src/channels/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.cjs"
   },
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "peerDependenciesMeta": { "@earendil-works/pi-coding-agent": { "optional": true } },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.1.0",
     "@types/node": "^22.0.0",
