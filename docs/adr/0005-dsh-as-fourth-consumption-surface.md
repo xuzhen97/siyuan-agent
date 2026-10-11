@@ -38,7 +38,7 @@ DSH 的三条扩展路径（2026-10-11 从 `app.asar` 抠出确切契约）：
 
 正面：
 
-- 任何新环境一条命令装完；**不需要 `allowBuilds`**、不写 DSH_HOME；`remove` 会立刻清掉 `dependencies` 与 `dsh.profile.bundles` 里的记录、技能当场从会话目录消失（实测；仅 `node_modules` 里的 Junction 会残留，无功能影响）。
+- 任何新环境一条命令装完；**不需要 `allowBuilds`**、不写 DSH_HOME；`remove` 会立刻清掉 `dependencies` 与 `dsh.profile.bundles` 里的记录、技能当场从会话目录消失（实测）。残留只在 **link 安装**（开发期用本地目录）出现：会留下 Junction 并阻断后续换规格安装，需 `cmd /c rmdir` 手工摘除；**发布与使用路径（`github:` 实体目录）零残留**。
 - `skills/siyuan/SKILL.md` 仍是 Pi 与 DSH **共用的一份**，命令表由真源生成（ADR-0001 的生成物），不会出现「两个宿主各自维护一份技能」。
 - 改 SKILL.md 即时生效（provider 每次 `get()` 重读文件），无需重启。
 
@@ -60,7 +60,10 @@ DSH 的三条扩展路径（2026-10-11 从 `app.asar` 抠出确切契约）：
 - `node <profile>/node_modules/siyuan-agent/dist/cli.cjs version --json` → `{"version":"3.8.6"}`（只读调用，未触碰任何笔记数据）。
 - `remove` 后**立即**：`dependencies` 与该 `bundles` 行均恢复干净，且技能从会话技能目录消失（实测收到目录变更）。两处**残留/时延**需知悉：① `node_modules/siyuan-agent` 这个 Junction 未被 pnpm 删除（不影响加载，因为 bundles 行已移除）；② 重新 `add` 后技能会重新出现，但**非瞬时**（本次实测需等一次技能目录失效，数十秒内完成；无需重启）。
 - 未能按原计划验证：`dsh --profile desktop --dump-config` 在本机失败——**PATH 上的 `dsh`（npm 全局）与 GUI 是两个不同的 DSH 安装**，前者不带 `@deepseek-ai/dsh-experimental-schedule-bundle`，而该行在本决策之前就已在 `bundles` 里。故层叠树的核对改用「运行时会话技能目录出现 `siyuan`」替代。
-- 远端安装路径（`github:xuzhen97/siyuan-agent`）待推送后补验，并确认没有触发 `ERR_PNPM_IGNORED_BUILDS`（本包无安装脚本，预期不会）。
+- **本地目录（link）安装的遗留风险（实测踩到，务必写进运维手册）**：`remove` 后残留的 Junction 会让**下一次 `dsh plugin --profile desktop add github:xuzhen97/siyuan-agent` 直接失败**——报 `[ERR_PNPM_EPERM] ... symlink ...`，而 dsh CLI 的错误尾巴会把它误导成「git 插件需要放行 prepare 构建脚本」（本包根本没有安装脚本）。正确处置：`cmd /c rmdir "<profile>/node_modules/siyuan-agent"`（**不带 `/S`**，只摘链接、不动目标仓库；`Remove-Item -Recurse` 有顺链接删掉目标内容的风险），再重跑 `add`——本次照此即成功。
+- **`github:` 规格装出来的是实体目录**（已推送提交的快照；本次安装副本的 `dsh/index.mjs` 与仓库 HEAD 哈希一致），不像 `link:` 那样「改仓库即时生效」——升级要重新 `add` 才会解析到新提交。
+- 远端安装路径（`github:xuzhen97/siyuan-agent`）**已实测通过**（exit 0，未触发 `ERR_PNPM_IGNORED_BUILDS`，也没有任何 `allowBuilds` 记录）；安装后技能再次出现在会话技能目录中。
+- **两种安装形态的卸载干净度不同（实测）**：`github:` 实体目录执行 `remove` 后**零残留**（目录被彻底删除，重装一次 5.1s 成功）；只有 `link:`（本地目录）才会留下 Junction。也就是说**面向使用的 github 路径没有残留问题**，残留只出现在「开发期用本地目录安装」这一种场景。
 
 退出条件（出现其一即另立 ADR supersede 本决策）：
 
