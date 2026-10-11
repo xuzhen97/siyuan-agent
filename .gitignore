@@ -5,4 +5,7 @@
 node_modules/
 *.tsbuildinfo
 
+# 编辑器/工具在本仓库根留下的运行目录（KnowCode 索引守护进程的日志等）
+.knowcode/
+
 # 注意：dist/ 与 plugins/*/index.cjs 是提交进仓库的制品（ADR-0003），不要忽略
