@@ -292,6 +292,56 @@ var SiYuanClient = class _SiYuanClient {
   removeDocByID(id) {
     return this.call("/api/filetree/removeDocByID", { id });
   }
+  // ── 笔记本级写方法 / 导出 / 折叠 / 按路径操作 / 批量替换（对齐参考实现）──
+  openNotebook(notebook) {
+    return this.call("/api/notebook/openNotebook", { notebook });
+  }
+  closeNotebook(notebook) {
+    return this.call("/api/notebook/closeNotebook", { notebook });
+  }
+  removeNotebook(notebook) {
+    return this.call("/api/notebook/removeNotebook", { notebook });
+  }
+  renameNotebook(notebook, name) {
+    return this.call("/api/notebook/renameNotebook", { notebook, name });
+  }
+  setNotebookIcon(notebook, icon) {
+    return this.call("/api/notebook/setNotebookIcon", { notebook, icon });
+  }
+  /** 真实响应：data = conf（内核回显保存后的配置）。 */
+  setNotebookConf(notebook, conf) {
+    return this.call("/api/notebook/setNotebookConf", { notebook, conf }).then(
+      (d) => d ?? {}
+    );
+  }
+  /** 真实响应：data = { path }（workspace 内的 zip 相对路径）。 */
+  async exportResources(paths, name) {
+    const body = { paths };
+    if (name) body.name = name;
+    const data = await this.call("/api/export/exportResources", body);
+    return data?.path ?? "";
+  }
+  foldBlock(id) {
+    return this.call("/api/block/foldBlock", { id });
+  }
+  unfoldBlock(id) {
+    return this.call("/api/block/unfoldBlock", { id });
+  }
+  renameDoc(notebook, path, title) {
+    return this.call("/api/filetree/renameDoc", { notebook, path, title });
+  }
+  removeDoc(notebook, path) {
+    return this.call("/api/filetree/removeDoc", { notebook, path });
+  }
+  moveDocs(fromPaths, toNotebook, toPath) {
+    return this.call("/api/filetree/moveDocs", { fromPaths, toNotebook, toPath });
+  }
+  /** 内核源码：{ k, r, ids: string[], replaceTypes?: Record<string, boolean> }。 */
+  findReplace(k, r, ids, replaceTypes) {
+    const body = { k, r, ids };
+    if (replaceTypes) body.replaceTypes = replaceTypes;
+    return this.call("/api/search/findReplace", body);
+  }
   /** 供乐观并发校验（W9）：用只读 SQL 取当前块哈希。 */
   async getBlockHash(id) {
     const escaped = id.replace(/'/g, "''");
@@ -304,7 +354,13 @@ var SiYuanClient = class _SiYuanClient {
 // src/core/config.ts
 var import_node_fs = require("node:fs");
 var import_node_os = require("node:os");
-var DEFAULT_CONFIG = { host: "127.0.0.1", port: 6806, token: "", timeoutMs: 3e4 };
+var DEFAULT_CONFIG = {
+  host: "127.0.0.1",
+  port: 6806,
+  token: "",
+  timeoutMs: 3e4,
+  tokenSource: "none"
+};
 function configFilePath(homeDir) {
   return `${homeDir}/.siyuan-agent/config.json`;
 }
@@ -316,9 +372,28 @@ function parseTimeout(raw) {
   const n = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
   return Number.isInteger(n) && n > 0 ? n : void 0;
 }
+function nonEmptyString(value) {
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function siyuanConfPaths(homeDir, platform) {
+  return platform === "win32" ? [`${homeDir}/SiYuan/conf/conf.json`] : [`${homeDir}/.config/siyuan/conf/conf.json`];
+}
+function readSiYuanToken(readFile, homeDir, platform) {
+  for (const confPath of siyuanConfPaths(homeDir, platform)) {
+    try {
+      const parsed = JSON.parse(readFile(confPath).replace(/^\uFEFF/, ""));
+      const api = parsed?.api;
+      const token = api && typeof api.token === "string" ? api.token : "";
+      if (token.length > 0) return { token, source: "siyuan-conf" };
+    } catch {
+    }
+  }
+  return { token: "", source: "none" };
+}
 function resolveSiYuanConfig(overrides, deps) {
   const env = deps?.env ?? process.env;
   const home = deps?.homeDir ?? (0, import_node_os.homedir)();
+  const platform = deps?.platform ?? process.platform;
   const readFile = deps?.readFileSync ?? ((p) => (0, import_node_fs.readFileSync)(p, "utf-8"));
   let file = {};
   try {
@@ -331,16 +406,29 @@ function resolveSiYuanConfig(overrides, deps) {
     file = {};
   }
   const pickString = (...values) => values.find((v) => typeof v === "string" && v.length > 0);
-  const pickToken = (...values) => values.find((v) => typeof v === "string");
   const host = pickString(overrides?.host, env.SIYUAN_HOST, file.host) ?? DEFAULT_CONFIG.host;
   const port = parsePort(overrides?.port) ?? parsePort(env.SIYUAN_PORT) ?? parsePort(file.port) ?? DEFAULT_CONFIG.port;
   const timeoutMs = parseTimeout(overrides?.timeoutMs) ?? parseTimeout(env.SIYUAN_TIMEOUT_MS) ?? parseTimeout(file.timeoutMs) ?? DEFAULT_CONFIG.timeoutMs;
-  return {
-    host,
-    port,
-    token: pickToken(overrides?.token, env.SIYUAN_TOKEN, file.token) ?? DEFAULT_CONFIG.token,
-    timeoutMs
-  };
+  const tokenFromArg = nonEmptyString(overrides?.token);
+  const tokenFromEnv = nonEmptyString(env.SIYUAN_TOKEN);
+  const tokenFromFile = nonEmptyString(file.token);
+  let token = "";
+  let tokenSource = "none";
+  if (tokenFromArg !== void 0) {
+    token = tokenFromArg;
+    tokenSource = "arg";
+  } else if (tokenFromEnv !== void 0) {
+    token = tokenFromEnv;
+    tokenSource = "env";
+  } else if (tokenFromFile !== void 0) {
+    token = tokenFromFile;
+    tokenSource = "config-file";
+  } else {
+    const discovered = readSiYuanToken(readFile, home, platform);
+    token = discovered.token;
+    tokenSource = discovered.source;
+  }
+  return { host, port, token, timeoutMs, tokenSource };
 }
 
 // src/tools/naming.ts
@@ -600,6 +688,77 @@ async function requireFreshHash(client, id, expectedHash) {
     );
   }
 }
+async function buildNotebookPreview(client, notebook) {
+  try {
+    const { name, conf } = await client.getNotebookConf(notebook);
+    const docCount = await countDocs(client, notebook);
+    const icon = typeof conf.icon === "string" ? conf.icon : "";
+    const preview = [
+      `\u7B14\u8BB0\u672C\u540D\u79F0\uFF1A${name}`,
+      `\u56FE\u6807\uFF1A${icon || "(\u672A\u8BBE\u7F6E)"}`,
+      `\u5F53\u524D\u72B6\u6001\uFF1A${conf.closed === true ? "\u5DF2\u5173\u95ED" : "\u5DF2\u6253\u5F00"}`,
+      `\u6587\u6863\u6570\uFF1A${docCount}`,
+      `\u65E5\u8BB0\u4FDD\u5B58\u8DEF\u5F84\uFF1A${String(conf.dailyNoteSavePath ?? "(\u672A\u914D\u7F6E)")}`
+    ].join("\n");
+    return { preview, exists: true, name, icon, docCount };
+  } catch {
+    return {
+      preview: "\u76EE\u6807\u7B14\u8BB0\u672C\u4E0D\u5B58\u5728\uFF08\u53EF\u80FD\u5DF2\u88AB\u5220\u9664\u6216 ID \u6709\u8BEF\uFF09",
+      exists: false,
+      name: "",
+      icon: "",
+      docCount: 0
+    };
+  }
+}
+async function countDocs(client, notebook) {
+  try {
+    const escaped = notebook.replace(/'/g, "''");
+    const { rows } = await client.querySql(
+      `SELECT COUNT(*) AS c FROM blocks WHERE box = '${escaped}' AND type = 'd'`
+    );
+    const value = rows[0]?.c;
+    const count = typeof value === "number" ? value : Number(value ?? 0);
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+function requireConfirmName(args, currentName, what) {
+  const provided = typeof args.confirmName === "string" ? args.confirmName.trim() : "";
+  if (currentName.length > 0 && provided === currentName) return;
+  throw new SiYuanError("SIYUAN_CONFIRM_MISMATCH", `${what} \u7684 confirmName \u4E0E\u5F53\u524D\u540D\u79F0\u4E0D\u4E00\u81F4\uFF0C\u5DF2\u62D2\u7EDD\u6267\u884C\u3002`, {
+    hint: `\u5F53\u524D\u540D\u79F0\u662F\u300C${currentName}\u300D\u3002\u8BF7\u628A\u5B83\u539F\u6837\u586B\u5165 confirmName \u518D\u8C03\u7528\uFF08\u8FD9\u662F\u6574\u5E93\u5220\u9664\u7684\u4E8C\u6B21\u786E\u8BA4\uFF09\u3002`
+  });
+}
+function requireIdList(args, key) {
+  const raw = args[key];
+  let ids = [];
+  if (Array.isArray(raw)) {
+    ids = raw.map((value) => String(value).trim());
+  } else if (typeof raw === "string") {
+    const text = raw.trim();
+    if (text.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) ids = parsed.map((value) => String(value).trim());
+      } catch {
+        ids = [];
+      }
+    } else {
+      ids = text.split(",").map((part) => part.trim());
+    }
+  }
+  const unique = [...new Set(ids.filter((id) => id.length > 0))];
+  if (unique.length === 0) {
+    throw new SiYuanError(
+      "SIYUAN_API_ERROR",
+      `${key} \u4E0D\u80FD\u4E3A\u7A7A\uFF1A\u6279\u91CF\u66FF\u6362\u5FC5\u987B\u9650\u5B9A\u5230\u5177\u4F53\u5757 ID \u5217\u8868\uFF08\u4E0D\u5141\u8BB8\u5168\u5E93\u66FF\u6362\uFF09`,
+      { hint: "\u5148\u7528 search_blocks \u6216 sql \u627E\u5230\u76EE\u6807\u5757\uFF0C\u518D\u628A\u5B83\u4EEC\u7684 ID \u4F20\u7ED9 ids\uFF08\u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\uFF09\u3002" }
+    );
+  }
+  return unique;
+}
 
 // src/tools/definitions.ts
 function compactDocEntry(entry2) {
@@ -630,15 +789,16 @@ var readOnlyTools = [
       const connected = await client.ping();
       const version = connected ? await client.version() : "";
       const time = connected ? await client.currentTime() : 0;
-      const { host, port, token } = client.config;
+      const { host, port, token, tokenSource } = client.config;
       const text = [
         `\u8FDE\u63A5\uFF1A${connected ? "\u6B63\u5E38" : "\u4E0D\u53EF\u8FBE"}`,
         `\u5730\u5740\uFF1Ahttp://${host}:${port}`,
-        `Token\uFF1A${token ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`,
+        // 只报来源，绝不上显 Token 本身
+        `Token\uFF1A${token ? `\u5DF2\u914D\u7F6E\uFF08\u6765\u6E90\uFF1A${tokenSource}\uFF09` : "\u672A\u914D\u7F6E"}`,
         connected ? `\u5185\u6838\u7248\u672C\uFF1A${version}` : "",
         connected ? `\u5185\u6838\u65F6\u95F4\uFF1A${new Date(time).toISOString()}` : ""
       ].filter(Boolean).join("\n");
-      return { text, data: { connected, host, port, hasToken: Boolean(token), version, time } };
+      return { text, data: { connected, host, port, hasToken: Boolean(token), tokenSource, version, time } };
     }
   },
   {
@@ -948,6 +1108,102 @@ function parseIdList(raw) {
   }
   return ids;
 }
+function parseJsonObject(raw, label) {
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u9700\u8981 JSON \u5BF9\u8C61\u5B57\u7B26\u4E32`, {
+        hint: `\u4F8B\u5982 {"${label}Key":"value"}`
+      });
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u9700\u8981 JSON \u5BF9\u8C61`);
+  }
+  return parsed;
+}
+function parseListParam(raw, label) {
+  if (Array.isArray(raw)) return raw.map((value) => String(value).trim()).filter((value) => value.length > 0);
+  const text = String(raw ?? "").trim();
+  if (text.length === 0) return [];
+  if (text.startsWith("[")) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u7684 JSON \u6570\u7EC4\u683C\u5F0F\u975E\u6CD5`, {
+        hint: '\u4F8B\u5982 ["/a","/b"]\uFF1B\u4E5F\u53EF\u4EE5\u76F4\u63A5\u7528\u9017\u53F7\u5206\u9694\uFF1A/a,/b'
+      });
+    }
+    if (!Array.isArray(parsed)) {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u9700\u8981 JSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\u5B57\u7B26\u4E32`);
+    }
+    return parsed.map((value) => String(value).trim()).filter((value) => value.length > 0);
+  }
+  return text.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+}
+var ALL_REPLACE_TYPES = [
+  "text",
+  "imgText",
+  "imgTitle",
+  "imgSrc",
+  "aText",
+  "aTitle",
+  "aHref",
+  "code",
+  "em",
+  "strong",
+  "inlineMath",
+  "inlineMemo",
+  "blockRef",
+  "fileAnnotationRef",
+  "kbd",
+  "mark",
+  "s",
+  "sub",
+  "sup",
+  "tag",
+  "u",
+  "docTitle",
+  "codeBlock",
+  "mathBlock",
+  "htmlBlock"
+];
+function resolveReplaceTypes(raw) {
+  if (raw === void 0 || raw === "") {
+    return { types: { text: true }, label: "text\uFF08\u9ED8\u8BA4\u53EA\u66FF\u6362\u666E\u901A\u6587\u672C\uFF09" };
+  }
+  const parsed = parseJsonObject(raw, "replaceTypes");
+  if (parsed.all === true) {
+    return {
+      types: Object.fromEntries(ALL_REPLACE_TYPES.map((type) => [type, true])),
+      label: `\u5168\u90E8\u7C7B\u578B\uFF08${ALL_REPLACE_TYPES.length} \u79CD\uFF09`
+    };
+  }
+  const keys = Object.keys(parsed);
+  return { types: parsed, label: keys.length > 0 ? keys.join(", ") : "(\u7A7A\uFF0C\u5C06\u4E0D\u4F1A\u66FF\u6362\u4EFB\u4F55\u5185\u5BB9)" };
+}
+async function resolveIdByPath(client, notebook, path) {
+  const asHPath = path.replace(/\.sy$/i, "");
+  try {
+    const byHPath = await client.getIDsByHPath(notebook, asHPath);
+    if (byHPath.length > 0) return { ids: byHPath };
+  } catch {
+  }
+  try {
+    const normalized = path.startsWith("/") ? path : `/${path}`;
+    const slash = normalized.lastIndexOf("/");
+    const parent = slash <= 0 ? "/" : normalized.slice(0, slash);
+    const entries = await client.listDocsByPath(notebook, parent);
+    const hit = entries.find((entry2) => String(entry2.path ?? "") === normalized);
+    const id = hit ? String(hit.id ?? "") : "";
+    return { ids: id.length > 0 ? [id] : [] };
+  } catch {
+    return { ids: [] };
+  }
+}
 var additiveTools = [
   {
     name: "notebook_create",
@@ -1069,6 +1325,79 @@ var additiveTools = [
       const attrs = parseAttrs(args.attrs);
       await client.setBlockAttrs(String(args.id), attrs);
       return { text: `\u5DF2\u8BBE\u7F6E ${String(args.id)} \u7684\u5C5E\u6027\uFF1A${Object.keys(attrs).join(", ")}`, data: { id: args.id, attrs } };
+    }
+  },
+  {
+    name: "notebook_open",
+    title: "\u6253\u5F00\u7B14\u8BB0\u672C",
+    description: "\u6253\u5F00\uFF08\u52A0\u8F7D\uFF09\u6307\u5B9A\u7B14\u8BB0\u672C\u3002\u5C5E\u8FD0\u884C\u6001\u53D8\u66F4\u3001\u4E0D\u6539\u6570\u636E\uFF1B\u601D\u6E90\u5BA2\u6237\u7AEF\u754C\u9762\u4F1A\u540C\u6B65\u663E\u793A\u4E3A\u5DF2\u6253\u5F00\u3002",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const notebook = String(args.notebook);
+      await client.openNotebook(notebook);
+      return { text: `\u5DF2\u6253\u5F00\u7B14\u8BB0\u672C ${notebook}`, data: { notebook, opened: true } };
+    }
+  },
+  {
+    name: "notebook_close",
+    title: "\u5173\u95ED\u7B14\u8BB0\u672C",
+    description: "\u5173\u95ED\u6307\u5B9A\u7B14\u8BB0\u672C\uFF08\u4EC5\u8FD0\u884C\u6001\uFF0C\u6570\u636E\u4E0D\u52A8\uFF09\u3002\u82E5\u4E3B\u4EBA\u6B63\u5728\u601D\u6E90\u5BA2\u6237\u7AEF\u91CC\u4F7F\u7528\u8BE5\u7B14\u8BB0\u672C\uFF0C\u754C\u9762\u4F1A\u540C\u6B65\u53D8\u4E3A\u5DF2\u5173\u95ED\u3002",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const notebook = String(args.notebook);
+      await client.closeNotebook(notebook);
+      return { text: `\u5DF2\u5173\u95ED\u7B14\u8BB0\u672C ${notebook}\uFF08\u6570\u636E\u672A\u6539\u52A8\uFF09`, data: { notebook, closed: true } };
+    }
+  },
+  {
+    name: "export_resources",
+    title: "\u5BFC\u51FA\u8D44\u6E90\u4E3A zip",
+    description: "\u628A workspace \u5185\u7684\u6587\u4EF6/\u6587\u4EF6\u5939\u6253\u5305\u4E3A zip\uFF0C\u8FD4\u56DE zip \u5728 workspace \u4E2D\u7684\u76F8\u5BF9\u8DEF\u5F84\u3002\u5199\u5728\u4E34\u65F6\u5BFC\u51FA\u76EE\u5F55\uFF0C\u4E0D\u6539\u52A8\u7B14\u8BB0\u5185\u5BB9\u3002",
+    risk: "additive",
+    params: {
+      paths: {
+        type: "string",
+        required: true,
+        description: '\u8981\u5BFC\u51FA\u7684\u8DEF\u5F84\u5217\u8868\uFF1AJSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\uFF0C\u5982 ["/conf/appearance/boot"]'
+      },
+      name: { type: "string", description: "\u5BFC\u51FA\u6587\u4EF6\u540D\uFF08\u4E0D\u542B .zip\uFF09" }
+    },
+    invoke: async (client, args) => {
+      const paths = parseListParam(args.paths, "paths");
+      if (paths.length === 0) {
+        throw new SiYuanError("SIYUAN_API_ERROR", "paths \u4E0D\u80FD\u4E3A\u7A7A", { hint: "\u81F3\u5C11\u7ED9\u4E00\u4E2A workspace \u5185\u8DEF\u5F84\u3002" });
+      }
+      const zipPath = await client.exportResources(paths, optionalString(args.name));
+      return {
+        text: zipPath ? `\u5DF2\u5BFC\u51FA\uFF1A${zipPath}\uFF08${paths.length} \u4E2A\u8DEF\u5F84\uFF09` : "\u5185\u6838\u672A\u8FD4\u56DE\u5BFC\u51FA\u8DEF\u5F84",
+        data: { path: zipPath, paths }
+      };
+    }
+  },
+  {
+    name: "block_fold",
+    title: "\u6298\u53E0\u5757",
+    description: "\u6298\u53E0\u6307\u5B9A\u5757\uFF08\u53EA\u6539\u6298\u53E0\u72B6\u6001\uFF0C\u53EF\u9006\uFF0C\u4E0D\u6539\u5185\u5BB9\uFF09\u3002",
+    risk: "additive",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const id = String(args.id);
+      await client.foldBlock(id);
+      return { text: `\u5DF2\u6298\u53E0\u5757 ${id}`, data: { id, folded: true } };
+    }
+  },
+  {
+    name: "block_unfold",
+    title: "\u5C55\u5F00\u5757",
+    description: "\u5C55\u5F00\u6307\u5B9A\u5757\uFF08\u53EA\u6539\u6298\u53E0\u72B6\u6001\uFF0C\u53EF\u9006\uFF09\u3002",
+    risk: "additive",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const id = String(args.id);
+      await client.unfoldBlock(id);
+      return { text: `\u5DF2\u5C55\u5F00\u5757 ${id}`, data: { id, folded: false } };
     }
   }
 ];
@@ -1229,6 +1558,267 @@ ${preview}
 
 \u63D0\u793A\uFF1A\u5185\u6838\u5DF2\u628A\u8BE5\u6587\u6863\u5199\u5165\u6570\u636E\u5386\u53F2\uFF0C\u53EF\u5728\u601D\u6E90\u300C\u6570\u636E\u5386\u53F2\u300D\u4E2D\u56DE\u6EDA\uFF08\u53D7\u5386\u53F2\u4FDD\u7559\u8BBE\u7F6E\u9650\u5236\uFF09\u3002`,
         data: { id }
+      };
+    }
+  },
+  {
+    name: "doc_rename_by_path",
+    title: "\u6309\u8DEF\u5F84\u91CD\u547D\u540D\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u6309\u300C\u7B14\u8BB0\u672C + \u6587\u6863\u8DEF\u5F84\u300D\u91CD\u547D\u540D\u6587\u6863\u6807\u9898\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u4E0D\u4F20\u5219\u53EA\u8FD4\u56DE\u9884\u89C8\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "\u6587\u6863\u8DEF\u5F84\uFF08\u76F8\u5BF9\u7B14\u8BB0\u672C\uFF0C\u5982 /a.sy\uFF09" },
+      title: { type: "string", required: true, description: "\u65B0\u7684\u6587\u6863\u6807\u9898" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_rename_by_path");
+      const notebook = String(args.notebook);
+      const path = requireName(spec, args, "path");
+      const title = requireName(spec, args, "title");
+      const { ids } = await resolveIdByPath(client, notebook, path);
+      const preview = `\u7B14\u8BB0\u672C\uFF1A${notebook}
+\u6587\u6863\u8DEF\u5F84\uFF1A${path}${ids.length > 0 ? `
+\u89E3\u6790\u5230\u6587\u6863 ID\uFF1A${ids.join(", ")}` : "\n\uFF08\u672A\u80FD\u6309\u6B64\u8DEF\u5F84\u89E3\u6790\u5230\u6587\u6863\uFF09"}
+\u65B0\u6807\u9898\uFF1A${title}`;
+      requireConfirm(spec, args, preview, ids.length > 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u91CD\u547D\u540D\u4E3A\u300C${title}\u300D`, preview), data: { dryRun: true } };
+      }
+      await client.renameDoc(notebook, path, title);
+      return { text: `\u5DF2\u91CD\u547D\u540D ${path} \u4E3A\u300C${title}\u300D
+${preview}`, data: { notebook, path, title } };
+    }
+  },
+  {
+    name: "doc_remove_by_path",
+    title: "\u6309\u8DEF\u5F84\u5220\u9664\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u6309\u300C\u7B14\u8BB0\u672C + \u6587\u6863\u8DEF\u5F84\u300D\u5220\u9664\u6587\u6863\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u5185\u6838\u4F1A\u5148\u628A\u6587\u4EF6\u5199\u5165\u6570\u636E\u5386\u53F2\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "\u6587\u6863\u8DEF\u5F84\uFF08\u76F8\u5BF9\u7B14\u8BB0\u672C\uFF0C\u5982 /a.sy\uFF09" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_remove_by_path");
+      const notebook = String(args.notebook);
+      const path = requireName(spec, args, "path");
+      const { ids } = await resolveIdByPath(client, notebook, path);
+      const preview = `\u7B14\u8BB0\u672C\uFF1A${notebook}
+\u6587\u6863\u8DEF\u5F84\uFF1A${path}${ids.length > 0 ? `
+\u89E3\u6790\u5230\u6587\u6863 ID\uFF1A${ids.join(", ")}` : "\n\uFF08\u672A\u80FD\u6309\u6B64\u8DEF\u5F84\u89E3\u6790\u5230\u6587\u6863\uFF09"}`;
+      requireConfirm(spec, args, preview, ids.length > 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u5220\u9664\u8BE5\u6587\u6863", preview), data: { dryRun: true } };
+      }
+      await client.removeDoc(notebook, path);
+      return {
+        text: `\u5DF2\u5220\u9664\u6587\u6863 ${path}
+${preview}
+
+\u63D0\u793A\uFF1A\u5185\u6838\u5DF2\u628A\u8BE5\u6587\u6863\u5199\u5165\u6570\u636E\u5386\u53F2\uFF0C\u53EF\u5728\u601D\u6E90\u300C\u6570\u636E\u5386\u53F2\u300D\u4E2D\u56DE\u6EDA\u3002`,
+        data: { notebook, path }
+      };
+    }
+  },
+  {
+    name: "doc_move_by_path",
+    title: "\u6309\u8DEF\u5F84\u79FB\u52A8\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u6309\u8DEF\u5F84\u628A\u4E00\u4E2A\u6216\u591A\u4E2A\u6587\u6863\u79FB\u52A8\u5230\u76EE\u6807\u7B14\u8BB0\u672C/\u8DEF\u5F84\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002",
+    risk: "destructive",
+    params: {
+      fromPaths: { type: "string", required: true, description: "\u6E90\u6587\u6863\u8DEF\u5F84\u5217\u8868\uFF1AJSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694" },
+      toNotebook: { type: "string", required: true, description: "\u76EE\u6807\u7B14\u8BB0\u672C ID" },
+      toPath: { type: "string", required: true, description: "\u76EE\u6807\u76EE\u5F55\uFF08**\u5FC5\u987B\u5DF2\u5B58\u5728**\uFF1B\u6839\u76EE\u5F55\u7528 /\uFF09" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_move_by_path");
+      const fromPaths = parseListParam(args.fromPaths, "fromPaths");
+      if (fromPaths.length === 0) {
+        throw new SiYuanError("SIYUAN_API_ERROR", "fromPaths \u4E0D\u80FD\u4E3A\u7A7A", { hint: "\u7ED9\u51FA\u81F3\u5C11\u4E00\u4E2A\u6E90\u6587\u6863\u8DEF\u5F84\u3002" });
+      }
+      const toNotebook = requireName(spec, args, "toNotebook");
+      const toPath = requireName(spec, args, "toPath");
+      try {
+        await client.listDocsByPath(toNotebook, toPath);
+      } catch {
+        throw new SiYuanError(
+          "SIYUAN_NOT_FOUND",
+          `\u76EE\u6807\u76EE\u5F55\u4E0D\u5B58\u5728\uFF1A${toNotebook} \u7684 ${toPath}`,
+          { hint: "\u76EE\u6807\u76EE\u5F55\u5FC5\u987B\u5DF2\u5B58\u5728\uFF08\u6839\u76EE\u5F55\u7528 /\uFF09\uFF1B\u82E5\u8981\u7528\u65B0\u5C42\u7EA7\uFF0C\u5148\u7528 doc_create \u5EFA\u597D\u8BE5\u5C42\u7EA7\u7684\u6587\u6863\u3002" }
+        );
+      }
+      const preview = `\u5C06\u79FB\u52A8 ${fromPaths.length} \u4E2A\u6587\u6863\uFF1A
+${fromPaths.join("\n")}
+\u76EE\u6807\u7B14\u8BB0\u672C\uFF1A${toNotebook}
+\u76EE\u6807\u8DEF\u5F84\uFF1A${toPath}`;
+      requireConfirm(spec, args, preview, true);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u79FB\u52A8\u8FD9\u4E9B\u6587\u6863", preview), data: { dryRun: true, fromPaths } };
+      }
+      await client.moveDocs(fromPaths, toNotebook, toPath);
+      return { text: `\u5DF2\u79FB\u52A8 ${fromPaths.length} \u4E2A\u6587\u6863\u5230 ${toNotebook}${toPath}`, data: { fromPaths, toNotebook, toPath } };
+    }
+  },
+  {
+    name: "notebook_rename",
+    title: "\u91CD\u547D\u540D\u7B14\u8BB0\u672C\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u8986\u76D6\u7B14\u8BB0\u672C\u540D\u79F0\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9884\u89C8\u4F1A\u7ED9\u51FA\u5F53\u524D\u540D\u79F0\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      name: { type: "string", required: true, description: "\u65B0\u7684\u7B14\u8BB0\u672C\u540D\u79F0" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_rename");
+      const notebook = String(args.notebook);
+      const name = requireName(spec, args, "name");
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u6539\u540D\u4E3A\u300C${name}\u300D`, info.preview), data: { dryRun: true, exists: info.exists } };
+      }
+      await client.renameNotebook(notebook, name);
+      return { text: `\u5DF2\u628A\u7B14\u8BB0\u672C\u6539\u540D\u4E3A\u300C${name}\u300D\uFF08\u539F\u540D\u79F0\uFF1A${info.name}\uFF09`, data: { notebook, name, previousName: info.name } };
+    }
+  },
+  {
+    name: "notebook_icon_set",
+    title: "\u8BBE\u7F6E\u7B14\u8BB0\u672C\u56FE\u6807\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u8986\u76D6\u7B14\u8BB0\u672C\u56FE\u6807\uFF08Unicode \u8868\u60C5\u7801\u70B9\u6216\u56FE\u6807\u8D44\u6E90\u540D\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9884\u89C8\u4F1A\u7ED9\u51FA\u5F53\u524D\u56FE\u6807\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      icon: { type: "string", required: true, description: "\u65B0\u56FE\u6807\uFF08\u5982 1f4d6 \u8FD9\u6837\u7684\u8868\u60C5\u7801\u70B9\uFF0C\u6216\u56FE\u6807\u8D44\u6E90\u540D\uFF09" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_icon_set");
+      const notebook = String(args.notebook);
+      const icon = requireName(spec, args, "icon");
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u56FE\u6807\u6539\u4E3A\u300C${icon}\u300D`, info.preview), data: { dryRun: true, exists: info.exists } };
+      }
+      await client.setNotebookIcon(notebook, icon);
+      return {
+        text: `\u5DF2\u8BBE\u7F6E\u7B14\u8BB0\u672C\u56FE\u6807\u4E3A\u300C${icon}\u300D\uFF08\u539F\u56FE\u6807\uFF1A${info.icon || "\u672A\u8BBE\u7F6E"}\uFF09`,
+        data: { notebook, icon, previousIcon: info.icon }
+      };
+    }
+  },
+  {
+    name: "notebook_conf_set",
+    title: "\u8BBE\u7F6E\u7B14\u8BB0\u672C\u914D\u7F6E\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u8986\u76D6\u7B14\u8BB0\u672C\u914D\u7F6E\uFF08\u5982 dailyNoteSavePath\u3001refCreateSavePath\u3001docCreateSavePath \u7B49\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9884\u89C8\u4F1A\u7ED9\u51FA\u5F53\u524D\u914D\u7F6E\u8981\u70B9\u3002\u5EFA\u8BAE\u5148\u7528 notebook_conf_get \u8BFB\u53D6\u73B0\u6709\u914D\u7F6E\u518D\u90E8\u5206\u4FEE\u6539\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      conf: {
+        type: "string",
+        required: true,
+        description: '\u8981\u5199\u5165\u7684\u914D\u7F6E JSON \u5BF9\u8C61\u5B57\u7B26\u4E32\uFF0C\u5982 {"dailyNoteSavePath":"/daily note/{{now | date \\"2006-01-02\\"}}"}'
+      },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_conf_set");
+      const notebook = String(args.notebook);
+      const conf = parseJsonObject(args.conf, "conf");
+      const info = await buildNotebookPreview(client, notebook);
+      const preview = `${info.preview}
+
+\u5C06\u5199\u5165\u7684\u914D\u7F6E\uFF1A
+${Object.entries(conf).map(([key, value]) => `- ${key}: ${String(value)}`).join("\n")}`;
+      requireConfirm(spec, args, preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u8986\u76D6\u7B14\u8BB0\u672C\u914D\u7F6E", preview), data: { dryRun: true, exists: info.exists } };
+      }
+      const saved = await client.setNotebookConf(notebook, conf);
+      return { text: `\u5DF2\u66F4\u65B0\u7B14\u8BB0\u672C\u914D\u7F6E\uFF08${Object.keys(conf).join(", ")}\uFF09
+${preview}`, data: { notebook, conf, saved } };
+    }
+  },
+  {
+    name: "notebook_remove",
+    title: "\u5220\u9664\u7B14\u8BB0\u672C\uFF08\u6700\u9AD8\u98CE\u9669\uFF09",
+    description: "\u5220\u9664\u6574\u4E2A\u7B14\u8BB0\u672C\uFF08\u542B\u5176\u5168\u90E8\u6587\u6863\uFF09\u3002\u9664 confirm: true \u5916\uFF0C**\u8FD8\u5FC5\u987B\u4F20 confirmName**\uFF0C\u4E14\u5176\u503C\u5FC5\u987B\u4E0E\u7B14\u8BB0\u672C\u5F53\u524D\u540D\u79F0\u9010\u5B57\u4E00\u81F4\u3002\u9884\u89C8\u4F1A\u7ED9\u51FA\u540D\u79F0\u4E0E\u6587\u6863\u6570\uFF1B\u4E0D\u4E00\u81F4\u65F6\u62A5 SIYUAN_CONFIRM_MISMATCH\u3002\u4E0D\u4F20 confirm \u65F6\u53EA\u8FD4\u56DE\u9884\u89C8\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      confirmName: { type: "string", required: true, description: "\u4E8C\u6B21\u786E\u8BA4\uFF1A\u5FC5\u987B\u9010\u5B57\u586B\u5199\u7B14\u8BB0\u672C\u5F53\u524D\u540D\u79F0" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_remove");
+      const notebook = String(args.notebook);
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return {
+          text: previewText(spec, `\u5C06\u5220\u9664\u6574\u4E2A\u7B14\u8BB0\u672C\uFF08\u542B ${info.docCount} \u7BC7\u6587\u6863\uFF09`, info.preview),
+          data: { dryRun: true, docCount: info.docCount }
+        };
+      }
+      requireConfirmName(args, info.name, "\u5220\u9664\u7B14\u8BB0\u672C");
+      await client.removeNotebook(notebook);
+      return {
+        text: `\u5DF2\u5220\u9664\u7B14\u8BB0\u672C\u300C${info.name}\u300D\uFF08\u542B ${info.docCount} \u7BC7\u6587\u6863\uFF09
+${info.preview}`,
+        data: { notebook, name: info.name, docCount: info.docCount }
+      };
+    }
+  },
+  {
+    name: "find_replace",
+    title: "\u6279\u91CF\u66FF\u6362\u5185\u5BB9\uFF08\u7834\u574F\u578B\uFF09",
+    description: '\u5728**\u6307\u5B9A\u5757**\u5185\u628A\u6587\u672C k \u66FF\u6362\u4E3A r\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u4E3A\u907F\u514D\u5168\u5E93\u8BEF\u66FF\u6362\uFF0Cids \u5FC5\u987B\u975E\u7A7A\u3001\u4E14 k \u4E0E r \u90FD\u4E0D\u80FD\u4E3A\u7A7A\u5B57\u7B26\u4E32\u3002\u5185\u6838\u7684\u66FF\u6362\u662F\u6309\u7C7B\u578B\u9010\u9879\u751F\u6548\u7684\uFF0C\u672C\u5DE5\u5177\u9ED8\u8BA4\u53EA\u66FF\u6362**\u666E\u901A\u6587\u672C**\uFF08text\uFF09\uFF1B\u9700\u8981\u8FDE\u4EE3\u7801\u5757\u3001\u6807\u9898\u7B49\u4E00\u8D77\u66FF\u6362\u65F6\u4F20 replaceTypes "{\\"all\\":true}" \u6216\u6307\u5B9A\u7C7B\u578B\u96C6\u5408\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u4E0D\u4F20\u5219\u53EA\u8FD4\u56DE\u9884\u89C8\u3002',
+    risk: "destructive",
+    params: {
+      k: { type: "string", required: true, description: "\u8981\u67E5\u627E\u7684\u6587\u672C" },
+      r: { type: "string", required: true, description: "\u66FF\u6362\u4E3A\u7684\u6587\u672C\uFF08\u4E0D\u652F\u6301\u7A7A\u4E32/\u5220\u9664\u5F0F\u66FF\u6362\uFF09" },
+      ids: {
+        type: "string",
+        required: true,
+        description: "\u76EE\u6807\u5757 ID \u5217\u8868\uFF1AJSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\uFF1B**\u4E0D\u5141\u8BB8\u4E3A\u7A7A**\uFF08\u7981\u6B62\u5168\u5E93\u66FF\u6362\uFF09"
+      },
+      replaceTypes: {
+        type: "string",
+        description: '\u53EF\u9009\u3002\u9ED8\u8BA4 {"text":true}\uFF08\u53EA\u66FF\u6362\u666E\u901A\u6587\u672C\uFF09\uFF1B\u4F20 {"all":true} \u66FF\u6362\u5168\u90E8 25 \u79CD\u7C7B\u578B\uFF0C\u6216\u81EA\u5B9A\u4E49\u5982 {"text":true,"code":true}'
+      },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("find_replace");
+      const k = requireName(spec, args, "k");
+      const r = requireName(spec, args, "r");
+      const ids = requireIdList(args, "ids");
+      const replaceTypes = resolveReplaceTypes(args.replaceTypes);
+      const preview = `\u5C06\u5728 ${ids.length} \u4E2A\u5757\u4E2D\u628A\u300C${k}\u300D\u66FF\u6362\u4E3A\u300C${r}\u300D
+\u66FF\u6362\u7C7B\u578B\uFF1A${replaceTypes.label}
+\u76EE\u6807\u5757\uFF1A${ids.slice(0, 10).join(", ")}${ids.length > 10 ? " \u2026" : ""}`;
+      requireConfirm(spec, args, preview, true);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u6267\u884C\u6279\u91CF\u66FF\u6362", preview), data: { dryRun: true, ids } };
+      }
+      await client.findReplace(k, r, ids, replaceTypes.types);
+      return {
+        text: `\u5DF2\u5728 ${ids.length} \u4E2A\u5757\u4E2D\u628A\u300C${k}\u300D\u66FF\u6362\u4E3A\u300C${r}\u300D\uFF08\u7C7B\u578B\uFF1A${replaceTypes.label}\uFF09
+${preview}`,
+        data: { k, r, ids, replaceTypes: replaceTypes.types }
       };
     }
   }

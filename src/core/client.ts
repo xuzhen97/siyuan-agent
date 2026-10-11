@@ -331,6 +331,70 @@ export class SiYuanClient {
     return this.call<void>("/api/filetree/removeDocByID", { id });
   }
 
+  // ── 笔记本级写方法 / 导出 / 折叠 / 按路径操作 / 批量替换（对齐参考实现）──
+
+  openNotebook(notebook: string): Promise<void> {
+    return this.call<void>("/api/notebook/openNotebook", { notebook });
+  }
+
+  closeNotebook(notebook: string): Promise<void> {
+    return this.call<void>("/api/notebook/closeNotebook", { notebook });
+  }
+
+  removeNotebook(notebook: string): Promise<void> {
+    return this.call<void>("/api/notebook/removeNotebook", { notebook });
+  }
+
+  renameNotebook(notebook: string, name: string): Promise<void> {
+    return this.call<void>("/api/notebook/renameNotebook", { notebook, name });
+  }
+
+  setNotebookIcon(notebook: string, icon: string): Promise<void> {
+    return this.call<void>("/api/notebook/setNotebookIcon", { notebook, icon });
+  }
+
+  /** 真实响应：data = conf（内核回显保存后的配置）。 */
+  setNotebookConf(notebook: string, conf: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.call<Record<string, unknown>>("/api/notebook/setNotebookConf", { notebook, conf }).then(
+      (d) => d ?? {},
+    );
+  }
+
+  /** 真实响应：data = { path }（workspace 内的 zip 相对路径）。 */
+  async exportResources(paths: string[], name?: string): Promise<string> {
+    const body: Record<string, unknown> = { paths };
+    if (name) body.name = name;
+    const data = await this.call<{ path?: string }>("/api/export/exportResources", body);
+    return data?.path ?? "";
+  }
+
+  foldBlock(id: string): Promise<void> {
+    return this.call<void>("/api/block/foldBlock", { id });
+  }
+
+  unfoldBlock(id: string): Promise<void> {
+    return this.call<void>("/api/block/unfoldBlock", { id });
+  }
+
+  renameDoc(notebook: string, path: string, title: string): Promise<void> {
+    return this.call<void>("/api/filetree/renameDoc", { notebook, path, title });
+  }
+
+  removeDoc(notebook: string, path: string): Promise<void> {
+    return this.call<void>("/api/filetree/removeDoc", { notebook, path });
+  }
+
+  moveDocs(fromPaths: string[], toNotebook: string, toPath: string): Promise<void> {
+    return this.call<void>("/api/filetree/moveDocs", { fromPaths, toNotebook, toPath });
+  }
+
+  /** 内核源码：{ k, r, ids: string[], replaceTypes?: Record<string, boolean> }。 */
+  findReplace(k: string, r: string, ids: string[], replaceTypes?: Record<string, boolean>): Promise<void> {
+    const body: Record<string, unknown> = { k, r, ids };
+    if (replaceTypes) body.replaceTypes = replaceTypes;
+    return this.call<void>("/api/search/findReplace", body);
+  }
+
   /** 供乐观并发校验（W9）：用只读 SQL 取当前块哈希。 */
   async getBlockHash(id: string): Promise<string | undefined> {
     const escaped = id.replace(/'/g, "''");

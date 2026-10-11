@@ -25,7 +25,6 @@ __export(cli_exports, {
   usage: () => usage
 });
 module.exports = __toCommonJS(cli_exports);
-var import_node_util = require("node:util");
 
 // src/core/errors.ts
 var SiYuanError = class extends Error {
@@ -292,6 +291,56 @@ var SiYuanClient = class _SiYuanClient {
   removeDocByID(id) {
     return this.call("/api/filetree/removeDocByID", { id });
   }
+  // ── 笔记本级写方法 / 导出 / 折叠 / 按路径操作 / 批量替换（对齐参考实现）──
+  openNotebook(notebook) {
+    return this.call("/api/notebook/openNotebook", { notebook });
+  }
+  closeNotebook(notebook) {
+    return this.call("/api/notebook/closeNotebook", { notebook });
+  }
+  removeNotebook(notebook) {
+    return this.call("/api/notebook/removeNotebook", { notebook });
+  }
+  renameNotebook(notebook, name) {
+    return this.call("/api/notebook/renameNotebook", { notebook, name });
+  }
+  setNotebookIcon(notebook, icon) {
+    return this.call("/api/notebook/setNotebookIcon", { notebook, icon });
+  }
+  /** 真实响应：data = conf（内核回显保存后的配置）。 */
+  setNotebookConf(notebook, conf) {
+    return this.call("/api/notebook/setNotebookConf", { notebook, conf }).then(
+      (d) => d ?? {}
+    );
+  }
+  /** 真实响应：data = { path }（workspace 内的 zip 相对路径）。 */
+  async exportResources(paths, name) {
+    const body = { paths };
+    if (name) body.name = name;
+    const data = await this.call("/api/export/exportResources", body);
+    return data?.path ?? "";
+  }
+  foldBlock(id) {
+    return this.call("/api/block/foldBlock", { id });
+  }
+  unfoldBlock(id) {
+    return this.call("/api/block/unfoldBlock", { id });
+  }
+  renameDoc(notebook, path, title) {
+    return this.call("/api/filetree/renameDoc", { notebook, path, title });
+  }
+  removeDoc(notebook, path) {
+    return this.call("/api/filetree/removeDoc", { notebook, path });
+  }
+  moveDocs(fromPaths, toNotebook, toPath) {
+    return this.call("/api/filetree/moveDocs", { fromPaths, toNotebook, toPath });
+  }
+  /** 内核源码：{ k, r, ids: string[], replaceTypes?: Record<string, boolean> }。 */
+  findReplace(k, r, ids, replaceTypes) {
+    const body = { k, r, ids };
+    if (replaceTypes) body.replaceTypes = replaceTypes;
+    return this.call("/api/search/findReplace", body);
+  }
   /** 供乐观并发校验（W9）：用只读 SQL 取当前块哈希。 */
   async getBlockHash(id) {
     const escaped = id.replace(/'/g, "''");
@@ -304,7 +353,13 @@ var SiYuanClient = class _SiYuanClient {
 // src/core/config.ts
 var import_node_fs = require("node:fs");
 var import_node_os = require("node:os");
-var DEFAULT_CONFIG = { host: "127.0.0.1", port: 6806, token: "", timeoutMs: 3e4 };
+var DEFAULT_CONFIG = {
+  host: "127.0.0.1",
+  port: 6806,
+  token: "",
+  timeoutMs: 3e4,
+  tokenSource: "none"
+};
 function configFilePath(homeDir) {
   return `${homeDir}/.siyuan-agent/config.json`;
 }
@@ -316,9 +371,28 @@ function parseTimeout(raw) {
   const n = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
   return Number.isInteger(n) && n > 0 ? n : void 0;
 }
+function nonEmptyString(value) {
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+function siyuanConfPaths(homeDir, platform) {
+  return platform === "win32" ? [`${homeDir}/SiYuan/conf/conf.json`] : [`${homeDir}/.config/siyuan/conf/conf.json`];
+}
+function readSiYuanToken(readFile, homeDir, platform) {
+  for (const confPath of siyuanConfPaths(homeDir, platform)) {
+    try {
+      const parsed = JSON.parse(readFile(confPath).replace(/^\uFEFF/, ""));
+      const api = parsed?.api;
+      const token = api && typeof api.token === "string" ? api.token : "";
+      if (token.length > 0) return { token, source: "siyuan-conf" };
+    } catch {
+    }
+  }
+  return { token: "", source: "none" };
+}
 function resolveSiYuanConfig(overrides, deps) {
   const env = deps?.env ?? process.env;
   const home = deps?.homeDir ?? (0, import_node_os.homedir)();
+  const platform = deps?.platform ?? process.platform;
   const readFile = deps?.readFileSync ?? ((p) => (0, import_node_fs.readFileSync)(p, "utf-8"));
   let file = {};
   try {
@@ -331,16 +405,29 @@ function resolveSiYuanConfig(overrides, deps) {
     file = {};
   }
   const pickString = (...values) => values.find((v) => typeof v === "string" && v.length > 0);
-  const pickToken = (...values) => values.find((v) => typeof v === "string");
   const host = pickString(overrides?.host, env.SIYUAN_HOST, file.host) ?? DEFAULT_CONFIG.host;
   const port = parsePort(overrides?.port) ?? parsePort(env.SIYUAN_PORT) ?? parsePort(file.port) ?? DEFAULT_CONFIG.port;
   const timeoutMs = parseTimeout(overrides?.timeoutMs) ?? parseTimeout(env.SIYUAN_TIMEOUT_MS) ?? parseTimeout(file.timeoutMs) ?? DEFAULT_CONFIG.timeoutMs;
-  return {
-    host,
-    port,
-    token: pickToken(overrides?.token, env.SIYUAN_TOKEN, file.token) ?? DEFAULT_CONFIG.token,
-    timeoutMs
-  };
+  const tokenFromArg = nonEmptyString(overrides?.token);
+  const tokenFromEnv = nonEmptyString(env.SIYUAN_TOKEN);
+  const tokenFromFile = nonEmptyString(file.token);
+  let token = "";
+  let tokenSource = "none";
+  if (tokenFromArg !== void 0) {
+    token = tokenFromArg;
+    tokenSource = "arg";
+  } else if (tokenFromEnv !== void 0) {
+    token = tokenFromEnv;
+    tokenSource = "env";
+  } else if (tokenFromFile !== void 0) {
+    token = tokenFromFile;
+    tokenSource = "config-file";
+  } else {
+    const discovered = readSiYuanToken(readFile, home, platform);
+    token = discovered.token;
+    tokenSource = discovered.source;
+  }
+  return { host, port, token, timeoutMs, tokenSource };
 }
 
 // src/tools/naming.ts
@@ -585,6 +672,77 @@ async function requireFreshHash(client, id, expectedHash) {
     );
   }
 }
+async function buildNotebookPreview(client, notebook) {
+  try {
+    const { name, conf } = await client.getNotebookConf(notebook);
+    const docCount = await countDocs(client, notebook);
+    const icon = typeof conf.icon === "string" ? conf.icon : "";
+    const preview = [
+      `\u7B14\u8BB0\u672C\u540D\u79F0\uFF1A${name}`,
+      `\u56FE\u6807\uFF1A${icon || "(\u672A\u8BBE\u7F6E)"}`,
+      `\u5F53\u524D\u72B6\u6001\uFF1A${conf.closed === true ? "\u5DF2\u5173\u95ED" : "\u5DF2\u6253\u5F00"}`,
+      `\u6587\u6863\u6570\uFF1A${docCount}`,
+      `\u65E5\u8BB0\u4FDD\u5B58\u8DEF\u5F84\uFF1A${String(conf.dailyNoteSavePath ?? "(\u672A\u914D\u7F6E)")}`
+    ].join("\n");
+    return { preview, exists: true, name, icon, docCount };
+  } catch {
+    return {
+      preview: "\u76EE\u6807\u7B14\u8BB0\u672C\u4E0D\u5B58\u5728\uFF08\u53EF\u80FD\u5DF2\u88AB\u5220\u9664\u6216 ID \u6709\u8BEF\uFF09",
+      exists: false,
+      name: "",
+      icon: "",
+      docCount: 0
+    };
+  }
+}
+async function countDocs(client, notebook) {
+  try {
+    const escaped = notebook.replace(/'/g, "''");
+    const { rows } = await client.querySql(
+      `SELECT COUNT(*) AS c FROM blocks WHERE box = '${escaped}' AND type = 'd'`
+    );
+    const value = rows[0]?.c;
+    const count = typeof value === "number" ? value : Number(value ?? 0);
+    return Number.isFinite(count) ? count : 0;
+  } catch {
+    return 0;
+  }
+}
+function requireConfirmName(args, currentName, what) {
+  const provided = typeof args.confirmName === "string" ? args.confirmName.trim() : "";
+  if (currentName.length > 0 && provided === currentName) return;
+  throw new SiYuanError("SIYUAN_CONFIRM_MISMATCH", `${what} \u7684 confirmName \u4E0E\u5F53\u524D\u540D\u79F0\u4E0D\u4E00\u81F4\uFF0C\u5DF2\u62D2\u7EDD\u6267\u884C\u3002`, {
+    hint: `\u5F53\u524D\u540D\u79F0\u662F\u300C${currentName}\u300D\u3002\u8BF7\u628A\u5B83\u539F\u6837\u586B\u5165 confirmName \u518D\u8C03\u7528\uFF08\u8FD9\u662F\u6574\u5E93\u5220\u9664\u7684\u4E8C\u6B21\u786E\u8BA4\uFF09\u3002`
+  });
+}
+function requireIdList(args, key) {
+  const raw = args[key];
+  let ids = [];
+  if (Array.isArray(raw)) {
+    ids = raw.map((value) => String(value).trim());
+  } else if (typeof raw === "string") {
+    const text = raw.trim();
+    if (text.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) ids = parsed.map((value) => String(value).trim());
+      } catch {
+        ids = [];
+      }
+    } else {
+      ids = text.split(",").map((part) => part.trim());
+    }
+  }
+  const unique = [...new Set(ids.filter((id) => id.length > 0))];
+  if (unique.length === 0) {
+    throw new SiYuanError(
+      "SIYUAN_API_ERROR",
+      `${key} \u4E0D\u80FD\u4E3A\u7A7A\uFF1A\u6279\u91CF\u66FF\u6362\u5FC5\u987B\u9650\u5B9A\u5230\u5177\u4F53\u5757 ID \u5217\u8868\uFF08\u4E0D\u5141\u8BB8\u5168\u5E93\u66FF\u6362\uFF09`,
+      { hint: "\u5148\u7528 search_blocks \u6216 sql \u627E\u5230\u76EE\u6807\u5757\uFF0C\u518D\u628A\u5B83\u4EEC\u7684 ID \u4F20\u7ED9 ids\uFF08\u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\uFF09\u3002" }
+    );
+  }
+  return unique;
+}
 
 // src/tools/definitions.ts
 function compactDocEntry(entry2) {
@@ -615,15 +773,16 @@ var readOnlyTools = [
       const connected = await client.ping();
       const version = connected ? await client.version() : "";
       const time = connected ? await client.currentTime() : 0;
-      const { host, port, token } = client.config;
+      const { host, port, token, tokenSource } = client.config;
       const text = [
         `\u8FDE\u63A5\uFF1A${connected ? "\u6B63\u5E38" : "\u4E0D\u53EF\u8FBE"}`,
         `\u5730\u5740\uFF1Ahttp://${host}:${port}`,
-        `Token\uFF1A${token ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`,
+        // 只报来源，绝不上显 Token 本身
+        `Token\uFF1A${token ? `\u5DF2\u914D\u7F6E\uFF08\u6765\u6E90\uFF1A${tokenSource}\uFF09` : "\u672A\u914D\u7F6E"}`,
         connected ? `\u5185\u6838\u7248\u672C\uFF1A${version}` : "",
         connected ? `\u5185\u6838\u65F6\u95F4\uFF1A${new Date(time).toISOString()}` : ""
       ].filter(Boolean).join("\n");
-      return { text, data: { connected, host, port, hasToken: Boolean(token), version, time } };
+      return { text, data: { connected, host, port, hasToken: Boolean(token), tokenSource, version, time } };
     }
   },
   {
@@ -933,6 +1092,102 @@ function parseIdList(raw) {
   }
   return ids;
 }
+function parseJsonObject(raw, label) {
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u9700\u8981 JSON \u5BF9\u8C61\u5B57\u7B26\u4E32`, {
+        hint: `\u4F8B\u5982 {"${label}Key":"value"}`
+      });
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u9700\u8981 JSON \u5BF9\u8C61`);
+  }
+  return parsed;
+}
+function parseListParam(raw, label) {
+  if (Array.isArray(raw)) return raw.map((value) => String(value).trim()).filter((value) => value.length > 0);
+  const text = String(raw ?? "").trim();
+  if (text.length === 0) return [];
+  if (text.startsWith("[")) {
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u7684 JSON \u6570\u7EC4\u683C\u5F0F\u975E\u6CD5`, {
+        hint: '\u4F8B\u5982 ["/a","/b"]\uFF1B\u4E5F\u53EF\u4EE5\u76F4\u63A5\u7528\u9017\u53F7\u5206\u9694\uFF1A/a,/b'
+      });
+    }
+    if (!Array.isArray(parsed)) {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} \u9700\u8981 JSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\u5B57\u7B26\u4E32`);
+    }
+    return parsed.map((value) => String(value).trim()).filter((value) => value.length > 0);
+  }
+  return text.split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+}
+var ALL_REPLACE_TYPES = [
+  "text",
+  "imgText",
+  "imgTitle",
+  "imgSrc",
+  "aText",
+  "aTitle",
+  "aHref",
+  "code",
+  "em",
+  "strong",
+  "inlineMath",
+  "inlineMemo",
+  "blockRef",
+  "fileAnnotationRef",
+  "kbd",
+  "mark",
+  "s",
+  "sub",
+  "sup",
+  "tag",
+  "u",
+  "docTitle",
+  "codeBlock",
+  "mathBlock",
+  "htmlBlock"
+];
+function resolveReplaceTypes(raw) {
+  if (raw === void 0 || raw === "") {
+    return { types: { text: true }, label: "text\uFF08\u9ED8\u8BA4\u53EA\u66FF\u6362\u666E\u901A\u6587\u672C\uFF09" };
+  }
+  const parsed = parseJsonObject(raw, "replaceTypes");
+  if (parsed.all === true) {
+    return {
+      types: Object.fromEntries(ALL_REPLACE_TYPES.map((type) => [type, true])),
+      label: `\u5168\u90E8\u7C7B\u578B\uFF08${ALL_REPLACE_TYPES.length} \u79CD\uFF09`
+    };
+  }
+  const keys = Object.keys(parsed);
+  return { types: parsed, label: keys.length > 0 ? keys.join(", ") : "(\u7A7A\uFF0C\u5C06\u4E0D\u4F1A\u66FF\u6362\u4EFB\u4F55\u5185\u5BB9)" };
+}
+async function resolveIdByPath(client, notebook, path) {
+  const asHPath = path.replace(/\.sy$/i, "");
+  try {
+    const byHPath = await client.getIDsByHPath(notebook, asHPath);
+    if (byHPath.length > 0) return { ids: byHPath };
+  } catch {
+  }
+  try {
+    const normalized = path.startsWith("/") ? path : `/${path}`;
+    const slash = normalized.lastIndexOf("/");
+    const parent = slash <= 0 ? "/" : normalized.slice(0, slash);
+    const entries = await client.listDocsByPath(notebook, parent);
+    const hit = entries.find((entry2) => String(entry2.path ?? "") === normalized);
+    const id = hit ? String(hit.id ?? "") : "";
+    return { ids: id.length > 0 ? [id] : [] };
+  } catch {
+    return { ids: [] };
+  }
+}
 var additiveTools = [
   {
     name: "notebook_create",
@@ -1054,6 +1309,79 @@ var additiveTools = [
       const attrs = parseAttrs(args.attrs);
       await client.setBlockAttrs(String(args.id), attrs);
       return { text: `\u5DF2\u8BBE\u7F6E ${String(args.id)} \u7684\u5C5E\u6027\uFF1A${Object.keys(attrs).join(", ")}`, data: { id: args.id, attrs } };
+    }
+  },
+  {
+    name: "notebook_open",
+    title: "\u6253\u5F00\u7B14\u8BB0\u672C",
+    description: "\u6253\u5F00\uFF08\u52A0\u8F7D\uFF09\u6307\u5B9A\u7B14\u8BB0\u672C\u3002\u5C5E\u8FD0\u884C\u6001\u53D8\u66F4\u3001\u4E0D\u6539\u6570\u636E\uFF1B\u601D\u6E90\u5BA2\u6237\u7AEF\u754C\u9762\u4F1A\u540C\u6B65\u663E\u793A\u4E3A\u5DF2\u6253\u5F00\u3002",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const notebook = String(args.notebook);
+      await client.openNotebook(notebook);
+      return { text: `\u5DF2\u6253\u5F00\u7B14\u8BB0\u672C ${notebook}`, data: { notebook, opened: true } };
+    }
+  },
+  {
+    name: "notebook_close",
+    title: "\u5173\u95ED\u7B14\u8BB0\u672C",
+    description: "\u5173\u95ED\u6307\u5B9A\u7B14\u8BB0\u672C\uFF08\u4EC5\u8FD0\u884C\u6001\uFF0C\u6570\u636E\u4E0D\u52A8\uFF09\u3002\u82E5\u4E3B\u4EBA\u6B63\u5728\u601D\u6E90\u5BA2\u6237\u7AEF\u91CC\u4F7F\u7528\u8BE5\u7B14\u8BB0\u672C\uFF0C\u754C\u9762\u4F1A\u540C\u6B65\u53D8\u4E3A\u5DF2\u5173\u95ED\u3002",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const notebook = String(args.notebook);
+      await client.closeNotebook(notebook);
+      return { text: `\u5DF2\u5173\u95ED\u7B14\u8BB0\u672C ${notebook}\uFF08\u6570\u636E\u672A\u6539\u52A8\uFF09`, data: { notebook, closed: true } };
+    }
+  },
+  {
+    name: "export_resources",
+    title: "\u5BFC\u51FA\u8D44\u6E90\u4E3A zip",
+    description: "\u628A workspace \u5185\u7684\u6587\u4EF6/\u6587\u4EF6\u5939\u6253\u5305\u4E3A zip\uFF0C\u8FD4\u56DE zip \u5728 workspace \u4E2D\u7684\u76F8\u5BF9\u8DEF\u5F84\u3002\u5199\u5728\u4E34\u65F6\u5BFC\u51FA\u76EE\u5F55\uFF0C\u4E0D\u6539\u52A8\u7B14\u8BB0\u5185\u5BB9\u3002",
+    risk: "additive",
+    params: {
+      paths: {
+        type: "string",
+        required: true,
+        description: '\u8981\u5BFC\u51FA\u7684\u8DEF\u5F84\u5217\u8868\uFF1AJSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\uFF0C\u5982 ["/conf/appearance/boot"]'
+      },
+      name: { type: "string", description: "\u5BFC\u51FA\u6587\u4EF6\u540D\uFF08\u4E0D\u542B .zip\uFF09" }
+    },
+    invoke: async (client, args) => {
+      const paths = parseListParam(args.paths, "paths");
+      if (paths.length === 0) {
+        throw new SiYuanError("SIYUAN_API_ERROR", "paths \u4E0D\u80FD\u4E3A\u7A7A", { hint: "\u81F3\u5C11\u7ED9\u4E00\u4E2A workspace \u5185\u8DEF\u5F84\u3002" });
+      }
+      const zipPath = await client.exportResources(paths, optionalString(args.name));
+      return {
+        text: zipPath ? `\u5DF2\u5BFC\u51FA\uFF1A${zipPath}\uFF08${paths.length} \u4E2A\u8DEF\u5F84\uFF09` : "\u5185\u6838\u672A\u8FD4\u56DE\u5BFC\u51FA\u8DEF\u5F84",
+        data: { path: zipPath, paths }
+      };
+    }
+  },
+  {
+    name: "block_fold",
+    title: "\u6298\u53E0\u5757",
+    description: "\u6298\u53E0\u6307\u5B9A\u5757\uFF08\u53EA\u6539\u6298\u53E0\u72B6\u6001\uFF0C\u53EF\u9006\uFF0C\u4E0D\u6539\u5185\u5BB9\uFF09\u3002",
+    risk: "additive",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const id = String(args.id);
+      await client.foldBlock(id);
+      return { text: `\u5DF2\u6298\u53E0\u5757 ${id}`, data: { id, folded: true } };
+    }
+  },
+  {
+    name: "block_unfold",
+    title: "\u5C55\u5F00\u5757",
+    description: "\u5C55\u5F00\u6307\u5B9A\u5757\uFF08\u53EA\u6539\u6298\u53E0\u72B6\u6001\uFF0C\u53EF\u9006\uFF09\u3002",
+    risk: "additive",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const id = String(args.id);
+      await client.unfoldBlock(id);
+      return { text: `\u5DF2\u5C55\u5F00\u5757 ${id}`, data: { id, folded: false } };
     }
   }
 ];
@@ -1216,6 +1544,267 @@ ${preview}
         data: { id }
       };
     }
+  },
+  {
+    name: "doc_rename_by_path",
+    title: "\u6309\u8DEF\u5F84\u91CD\u547D\u540D\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u6309\u300C\u7B14\u8BB0\u672C + \u6587\u6863\u8DEF\u5F84\u300D\u91CD\u547D\u540D\u6587\u6863\u6807\u9898\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u4E0D\u4F20\u5219\u53EA\u8FD4\u56DE\u9884\u89C8\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "\u6587\u6863\u8DEF\u5F84\uFF08\u76F8\u5BF9\u7B14\u8BB0\u672C\uFF0C\u5982 /a.sy\uFF09" },
+      title: { type: "string", required: true, description: "\u65B0\u7684\u6587\u6863\u6807\u9898" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_rename_by_path");
+      const notebook = String(args.notebook);
+      const path = requireName(spec, args, "path");
+      const title = requireName(spec, args, "title");
+      const { ids } = await resolveIdByPath(client, notebook, path);
+      const preview = `\u7B14\u8BB0\u672C\uFF1A${notebook}
+\u6587\u6863\u8DEF\u5F84\uFF1A${path}${ids.length > 0 ? `
+\u89E3\u6790\u5230\u6587\u6863 ID\uFF1A${ids.join(", ")}` : "\n\uFF08\u672A\u80FD\u6309\u6B64\u8DEF\u5F84\u89E3\u6790\u5230\u6587\u6863\uFF09"}
+\u65B0\u6807\u9898\uFF1A${title}`;
+      requireConfirm(spec, args, preview, ids.length > 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u91CD\u547D\u540D\u4E3A\u300C${title}\u300D`, preview), data: { dryRun: true } };
+      }
+      await client.renameDoc(notebook, path, title);
+      return { text: `\u5DF2\u91CD\u547D\u540D ${path} \u4E3A\u300C${title}\u300D
+${preview}`, data: { notebook, path, title } };
+    }
+  },
+  {
+    name: "doc_remove_by_path",
+    title: "\u6309\u8DEF\u5F84\u5220\u9664\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u6309\u300C\u7B14\u8BB0\u672C + \u6587\u6863\u8DEF\u5F84\u300D\u5220\u9664\u6587\u6863\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u5185\u6838\u4F1A\u5148\u628A\u6587\u4EF6\u5199\u5165\u6570\u636E\u5386\u53F2\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "\u6587\u6863\u8DEF\u5F84\uFF08\u76F8\u5BF9\u7B14\u8BB0\u672C\uFF0C\u5982 /a.sy\uFF09" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_remove_by_path");
+      const notebook = String(args.notebook);
+      const path = requireName(spec, args, "path");
+      const { ids } = await resolveIdByPath(client, notebook, path);
+      const preview = `\u7B14\u8BB0\u672C\uFF1A${notebook}
+\u6587\u6863\u8DEF\u5F84\uFF1A${path}${ids.length > 0 ? `
+\u89E3\u6790\u5230\u6587\u6863 ID\uFF1A${ids.join(", ")}` : "\n\uFF08\u672A\u80FD\u6309\u6B64\u8DEF\u5F84\u89E3\u6790\u5230\u6587\u6863\uFF09"}`;
+      requireConfirm(spec, args, preview, ids.length > 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u5220\u9664\u8BE5\u6587\u6863", preview), data: { dryRun: true } };
+      }
+      await client.removeDoc(notebook, path);
+      return {
+        text: `\u5DF2\u5220\u9664\u6587\u6863 ${path}
+${preview}
+
+\u63D0\u793A\uFF1A\u5185\u6838\u5DF2\u628A\u8BE5\u6587\u6863\u5199\u5165\u6570\u636E\u5386\u53F2\uFF0C\u53EF\u5728\u601D\u6E90\u300C\u6570\u636E\u5386\u53F2\u300D\u4E2D\u56DE\u6EDA\u3002`,
+        data: { notebook, path }
+      };
+    }
+  },
+  {
+    name: "doc_move_by_path",
+    title: "\u6309\u8DEF\u5F84\u79FB\u52A8\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u6309\u8DEF\u5F84\u628A\u4E00\u4E2A\u6216\u591A\u4E2A\u6587\u6863\u79FB\u52A8\u5230\u76EE\u6807\u7B14\u8BB0\u672C/\u8DEF\u5F84\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002",
+    risk: "destructive",
+    params: {
+      fromPaths: { type: "string", required: true, description: "\u6E90\u6587\u6863\u8DEF\u5F84\u5217\u8868\uFF1AJSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694" },
+      toNotebook: { type: "string", required: true, description: "\u76EE\u6807\u7B14\u8BB0\u672C ID" },
+      toPath: { type: "string", required: true, description: "\u76EE\u6807\u76EE\u5F55\uFF08**\u5FC5\u987B\u5DF2\u5B58\u5728**\uFF1B\u6839\u76EE\u5F55\u7528 /\uFF09" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_move_by_path");
+      const fromPaths = parseListParam(args.fromPaths, "fromPaths");
+      if (fromPaths.length === 0) {
+        throw new SiYuanError("SIYUAN_API_ERROR", "fromPaths \u4E0D\u80FD\u4E3A\u7A7A", { hint: "\u7ED9\u51FA\u81F3\u5C11\u4E00\u4E2A\u6E90\u6587\u6863\u8DEF\u5F84\u3002" });
+      }
+      const toNotebook = requireName(spec, args, "toNotebook");
+      const toPath = requireName(spec, args, "toPath");
+      try {
+        await client.listDocsByPath(toNotebook, toPath);
+      } catch {
+        throw new SiYuanError(
+          "SIYUAN_NOT_FOUND",
+          `\u76EE\u6807\u76EE\u5F55\u4E0D\u5B58\u5728\uFF1A${toNotebook} \u7684 ${toPath}`,
+          { hint: "\u76EE\u6807\u76EE\u5F55\u5FC5\u987B\u5DF2\u5B58\u5728\uFF08\u6839\u76EE\u5F55\u7528 /\uFF09\uFF1B\u82E5\u8981\u7528\u65B0\u5C42\u7EA7\uFF0C\u5148\u7528 doc_create \u5EFA\u597D\u8BE5\u5C42\u7EA7\u7684\u6587\u6863\u3002" }
+        );
+      }
+      const preview = `\u5C06\u79FB\u52A8 ${fromPaths.length} \u4E2A\u6587\u6863\uFF1A
+${fromPaths.join("\n")}
+\u76EE\u6807\u7B14\u8BB0\u672C\uFF1A${toNotebook}
+\u76EE\u6807\u8DEF\u5F84\uFF1A${toPath}`;
+      requireConfirm(spec, args, preview, true);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u79FB\u52A8\u8FD9\u4E9B\u6587\u6863", preview), data: { dryRun: true, fromPaths } };
+      }
+      await client.moveDocs(fromPaths, toNotebook, toPath);
+      return { text: `\u5DF2\u79FB\u52A8 ${fromPaths.length} \u4E2A\u6587\u6863\u5230 ${toNotebook}${toPath}`, data: { fromPaths, toNotebook, toPath } };
+    }
+  },
+  {
+    name: "notebook_rename",
+    title: "\u91CD\u547D\u540D\u7B14\u8BB0\u672C\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u8986\u76D6\u7B14\u8BB0\u672C\u540D\u79F0\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9884\u89C8\u4F1A\u7ED9\u51FA\u5F53\u524D\u540D\u79F0\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      name: { type: "string", required: true, description: "\u65B0\u7684\u7B14\u8BB0\u672C\u540D\u79F0" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_rename");
+      const notebook = String(args.notebook);
+      const name = requireName(spec, args, "name");
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u6539\u540D\u4E3A\u300C${name}\u300D`, info.preview), data: { dryRun: true, exists: info.exists } };
+      }
+      await client.renameNotebook(notebook, name);
+      return { text: `\u5DF2\u628A\u7B14\u8BB0\u672C\u6539\u540D\u4E3A\u300C${name}\u300D\uFF08\u539F\u540D\u79F0\uFF1A${info.name}\uFF09`, data: { notebook, name, previousName: info.name } };
+    }
+  },
+  {
+    name: "notebook_icon_set",
+    title: "\u8BBE\u7F6E\u7B14\u8BB0\u672C\u56FE\u6807\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u8986\u76D6\u7B14\u8BB0\u672C\u56FE\u6807\uFF08Unicode \u8868\u60C5\u7801\u70B9\u6216\u56FE\u6807\u8D44\u6E90\u540D\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9884\u89C8\u4F1A\u7ED9\u51FA\u5F53\u524D\u56FE\u6807\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      icon: { type: "string", required: true, description: "\u65B0\u56FE\u6807\uFF08\u5982 1f4d6 \u8FD9\u6837\u7684\u8868\u60C5\u7801\u70B9\uFF0C\u6216\u56FE\u6807\u8D44\u6E90\u540D\uFF09" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_icon_set");
+      const notebook = String(args.notebook);
+      const icon = requireName(spec, args, "icon");
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u56FE\u6807\u6539\u4E3A\u300C${icon}\u300D`, info.preview), data: { dryRun: true, exists: info.exists } };
+      }
+      await client.setNotebookIcon(notebook, icon);
+      return {
+        text: `\u5DF2\u8BBE\u7F6E\u7B14\u8BB0\u672C\u56FE\u6807\u4E3A\u300C${icon}\u300D\uFF08\u539F\u56FE\u6807\uFF1A${info.icon || "\u672A\u8BBE\u7F6E"}\uFF09`,
+        data: { notebook, icon, previousIcon: info.icon }
+      };
+    }
+  },
+  {
+    name: "notebook_conf_set",
+    title: "\u8BBE\u7F6E\u7B14\u8BB0\u672C\u914D\u7F6E\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u8986\u76D6\u7B14\u8BB0\u672C\u914D\u7F6E\uFF08\u5982 dailyNoteSavePath\u3001refCreateSavePath\u3001docCreateSavePath \u7B49\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9884\u89C8\u4F1A\u7ED9\u51FA\u5F53\u524D\u914D\u7F6E\u8981\u70B9\u3002\u5EFA\u8BAE\u5148\u7528 notebook_conf_get \u8BFB\u53D6\u73B0\u6709\u914D\u7F6E\u518D\u90E8\u5206\u4FEE\u6539\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      conf: {
+        type: "string",
+        required: true,
+        description: '\u8981\u5199\u5165\u7684\u914D\u7F6E JSON \u5BF9\u8C61\u5B57\u7B26\u4E32\uFF0C\u5982 {"dailyNoteSavePath":"/daily note/{{now | date \\"2006-01-02\\"}}"}'
+      },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_conf_set");
+      const notebook = String(args.notebook);
+      const conf = parseJsonObject(args.conf, "conf");
+      const info = await buildNotebookPreview(client, notebook);
+      const preview = `${info.preview}
+
+\u5C06\u5199\u5165\u7684\u914D\u7F6E\uFF1A
+${Object.entries(conf).map(([key, value]) => `- ${key}: ${String(value)}`).join("\n")}`;
+      requireConfirm(spec, args, preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u8986\u76D6\u7B14\u8BB0\u672C\u914D\u7F6E", preview), data: { dryRun: true, exists: info.exists } };
+      }
+      const saved = await client.setNotebookConf(notebook, conf);
+      return { text: `\u5DF2\u66F4\u65B0\u7B14\u8BB0\u672C\u914D\u7F6E\uFF08${Object.keys(conf).join(", ")}\uFF09
+${preview}`, data: { notebook, conf, saved } };
+    }
+  },
+  {
+    name: "notebook_remove",
+    title: "\u5220\u9664\u7B14\u8BB0\u672C\uFF08\u6700\u9AD8\u98CE\u9669\uFF09",
+    description: "\u5220\u9664\u6574\u4E2A\u7B14\u8BB0\u672C\uFF08\u542B\u5176\u5168\u90E8\u6587\u6863\uFF09\u3002\u9664 confirm: true \u5916\uFF0C**\u8FD8\u5FC5\u987B\u4F20 confirmName**\uFF0C\u4E14\u5176\u503C\u5FC5\u987B\u4E0E\u7B14\u8BB0\u672C\u5F53\u524D\u540D\u79F0\u9010\u5B57\u4E00\u81F4\u3002\u9884\u89C8\u4F1A\u7ED9\u51FA\u540D\u79F0\u4E0E\u6587\u6863\u6570\uFF1B\u4E0D\u4E00\u81F4\u65F6\u62A5 SIYUAN_CONFIRM_MISMATCH\u3002\u4E0D\u4F20 confirm \u65F6\u53EA\u8FD4\u56DE\u9884\u89C8\u3002",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      confirmName: { type: "string", required: true, description: "\u4E8C\u6B21\u786E\u8BA4\uFF1A\u5FC5\u987B\u9010\u5B57\u586B\u5199\u7B14\u8BB0\u672C\u5F53\u524D\u540D\u79F0" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_remove");
+      const notebook = String(args.notebook);
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return {
+          text: previewText(spec, `\u5C06\u5220\u9664\u6574\u4E2A\u7B14\u8BB0\u672C\uFF08\u542B ${info.docCount} \u7BC7\u6587\u6863\uFF09`, info.preview),
+          data: { dryRun: true, docCount: info.docCount }
+        };
+      }
+      requireConfirmName(args, info.name, "\u5220\u9664\u7B14\u8BB0\u672C");
+      await client.removeNotebook(notebook);
+      return {
+        text: `\u5DF2\u5220\u9664\u7B14\u8BB0\u672C\u300C${info.name}\u300D\uFF08\u542B ${info.docCount} \u7BC7\u6587\u6863\uFF09
+${info.preview}`,
+        data: { notebook, name: info.name, docCount: info.docCount }
+      };
+    }
+  },
+  {
+    name: "find_replace",
+    title: "\u6279\u91CF\u66FF\u6362\u5185\u5BB9\uFF08\u7834\u574F\u578B\uFF09",
+    description: '\u5728**\u6307\u5B9A\u5757**\u5185\u628A\u6587\u672C k \u66FF\u6362\u4E3A r\uFF08\u5BF9\u9F50\u53C2\u8003\u5B9E\u73B0\uFF09\u3002\u4E3A\u907F\u514D\u5168\u5E93\u8BEF\u66FF\u6362\uFF0Cids \u5FC5\u987B\u975E\u7A7A\u3001\u4E14 k \u4E0E r \u90FD\u4E0D\u80FD\u4E3A\u7A7A\u5B57\u7B26\u4E32\u3002\u5185\u6838\u7684\u66FF\u6362\u662F\u6309\u7C7B\u578B\u9010\u9879\u751F\u6548\u7684\uFF0C\u672C\u5DE5\u5177\u9ED8\u8BA4\u53EA\u66FF\u6362**\u666E\u901A\u6587\u672C**\uFF08text\uFF09\uFF1B\u9700\u8981\u8FDE\u4EE3\u7801\u5757\u3001\u6807\u9898\u7B49\u4E00\u8D77\u66FF\u6362\u65F6\u4F20 replaceTypes "{\\"all\\":true}" \u6216\u6307\u5B9A\u7C7B\u578B\u96C6\u5408\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u4E0D\u4F20\u5219\u53EA\u8FD4\u56DE\u9884\u89C8\u3002',
+    risk: "destructive",
+    params: {
+      k: { type: "string", required: true, description: "\u8981\u67E5\u627E\u7684\u6587\u672C" },
+      r: { type: "string", required: true, description: "\u66FF\u6362\u4E3A\u7684\u6587\u672C\uFF08\u4E0D\u652F\u6301\u7A7A\u4E32/\u5220\u9664\u5F0F\u66FF\u6362\uFF09" },
+      ids: {
+        type: "string",
+        required: true,
+        description: "\u76EE\u6807\u5757 ID \u5217\u8868\uFF1AJSON \u6570\u7EC4\u6216\u9017\u53F7\u5206\u9694\uFF1B**\u4E0D\u5141\u8BB8\u4E3A\u7A7A**\uFF08\u7981\u6B62\u5168\u5E93\u66FF\u6362\uFF09"
+      },
+      replaceTypes: {
+        type: "string",
+        description: '\u53EF\u9009\u3002\u9ED8\u8BA4 {"text":true}\uFF08\u53EA\u66FF\u6362\u666E\u901A\u6587\u672C\uFF09\uFF1B\u4F20 {"all":true} \u66FF\u6362\u5168\u90E8 25 \u79CD\u7C7B\u578B\uFF0C\u6216\u81EA\u5B9A\u4E49\u5982 {"text":true,"code":true}'
+      },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("find_replace");
+      const k = requireName(spec, args, "k");
+      const r = requireName(spec, args, "r");
+      const ids = requireIdList(args, "ids");
+      const replaceTypes = resolveReplaceTypes(args.replaceTypes);
+      const preview = `\u5C06\u5728 ${ids.length} \u4E2A\u5757\u4E2D\u628A\u300C${k}\u300D\u66FF\u6362\u4E3A\u300C${r}\u300D
+\u66FF\u6362\u7C7B\u578B\uFF1A${replaceTypes.label}
+\u76EE\u6807\u5757\uFF1A${ids.slice(0, 10).join(", ")}${ids.length > 10 ? " \u2026" : ""}`;
+      requireConfirm(spec, args, preview, true);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u6267\u884C\u6279\u91CF\u66FF\u6362", preview), data: { dryRun: true, ids } };
+      }
+      await client.findReplace(k, r, ids, replaceTypes.types);
+      return {
+        text: `\u5DF2\u5728 ${ids.length} \u4E2A\u5757\u4E2D\u628A\u300C${k}\u300D\u66FF\u6362\u4E3A\u300C${r}\u300D\uFF08\u7C7B\u578B\uFF1A${replaceTypes.label}\uFF09
+${preview}`,
+        data: { k, r, ids, replaceTypes: replaceTypes.types }
+      };
+    }
   }
 ];
 var TOOL_SPECS = [...readOnlyTools, ...additiveTools, ...destructiveTools];
@@ -1229,9 +1818,15 @@ function optionalString(value) {
   return text.length > 0 ? text : void 0;
 }
 
-// src/channels/cli/index.ts
+// src/channels/cli/args.ts
+var import_node_util = require("node:util");
 var GLOBAL_OPTION_NAMES = /* @__PURE__ */ new Set(["json", "host", "port", "token", "config"]);
 var GLOBAL_VALUE_OPTIONS = /* @__PURE__ */ new Set(["host", "port", "token", "config"]);
+var PARAM_ALIASES = {
+  parent: "parentid",
+  previous: "previousid",
+  next: "nextid"
+};
 function normalizeKey(key) {
   return key.toLowerCase().replace(/-/g, "");
 }
@@ -1300,7 +1895,7 @@ function parseCliArgs(argv) {
       }
       continue;
     }
-    byNormalizedName.set(key, option.value);
+    byNormalizedName.set(PARAM_ALIASES[key] ?? key, option.value);
   }
   const spec = findSpec(positionals);
   if (!spec) return { tool: "", args: {}, global };
@@ -1330,6 +1925,391 @@ function parseCliArgs(argv) {
   }
   return { tool: spec.name, args, global };
 }
+function splitReplArgs(line) {
+  const tokens = [];
+  let current = "";
+  let quoted = false;
+  let started = false;
+  let quoteChar = null;
+  for (const ch of line) {
+    if (quoteChar !== null) {
+      if (ch === quoteChar) {
+        quoteChar = null;
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quoteChar = ch;
+      started = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      if (started || current.length > 0) {
+        tokens.push(current);
+        current = "";
+        started = false;
+        quoted = false;
+      }
+      continue;
+    }
+    current += ch;
+  }
+  if (started || current.length > 0) tokens.push(current);
+  return tokens;
+}
+
+// src/channels/cli/repl.ts
+var import_node_readline = require("node:readline");
+
+// src/channels/cli/stdin.ts
+var import_node_fs2 = require("node:fs");
+var STDIN_SENTINEL = "-";
+function stdinParams(spec) {
+  if (spec.name === "doc_create") return ["markdown"];
+  if (spec.name === "block_insert" || spec.name === "block_update") return ["data"];
+  return [];
+}
+var EXPLICIT_SENTINEL_ONLY = /* @__PURE__ */ new Set(["markdown"]);
+function resolveStdinArgs(spec, args, readStdin) {
+  const params = stdinParams(spec);
+  if (params.length === 0) return args;
+  const next = { ...args };
+  for (const param of params) {
+    const value = next[param];
+    const omitted = value === void 0 || value === "";
+    const wantsStdin = value === STDIN_SENTINEL || omitted && !EXPLICIT_SENTINEL_ONLY.has(param);
+    if (wantsStdin) next[param] = readStdin();
+  }
+  return next;
+}
+function readStdinText() {
+  try {
+    return (0, import_node_fs2.readFileSync)(0, "utf-8");
+  } catch {
+    return "";
+  }
+}
+
+// src/channels/cli/session.ts
+var import_node_fs3 = require("node:fs");
+var import_node_os2 = require("node:os");
+var import_node_path = require("node:path");
+var emptySession = {
+  currentNotebookId: "",
+  currentNotebookName: "",
+  currentDocId: "",
+  currentDocPath: "",
+  history: []
+};
+var HISTORY_LIMIT = 200;
+function defaultStateDir() {
+  return (0, import_node_path.join)((0, import_node_os2.homedir)(), ".siyuan-agent");
+}
+var SessionManager = class {
+  sessionPath;
+  state = { ...emptySession, history: [] };
+  dirty = false;
+  constructor(stateDir) {
+    this.sessionPath = (0, import_node_path.join)(stateDir ?? defaultStateDir(), "session.json");
+  }
+  load() {
+    try {
+      const parsed = JSON.parse((0, import_node_fs3.readFileSync)(this.sessionPath, "utf-8").replace(/^\uFEFF/, ""));
+      const raw = parsed ?? {};
+      const str = (value) => typeof value === "string" ? value : "";
+      const history = Array.isArray(raw.history) ? raw.history.filter((item) => typeof item === "string") : [];
+      this.state = {
+        currentNotebookId: str(raw.currentNotebookId),
+        currentNotebookName: str(raw.currentNotebookName),
+        currentDocId: str(raw.currentDocId),
+        currentDocPath: str(raw.currentDocPath),
+        history: history.slice(-HISTORY_LIMIT)
+      };
+    } catch {
+      this.state = { ...emptySession, history: [] };
+    }
+    this.dirty = false;
+    return this.state;
+  }
+  update(patch) {
+    if (patch.history !== void 0) {
+      this.state.history = patch.history.slice(-HISTORY_LIMIT);
+    }
+    for (const key of ["currentNotebookId", "currentNotebookName", "currentDocId", "currentDocPath"]) {
+      const value = patch[key];
+      if (typeof value === "string") this.state[key] = value;
+    }
+    this.dirty = true;
+  }
+  /** 仅在有过 update 时写盘（避免无谓 IO）。 */
+  flush() {
+    if (!this.dirty) return;
+    (0, import_node_fs3.mkdirSync)((0, import_node_path.dirname)(this.sessionPath), { recursive: true });
+    (0, import_node_fs3.writeFileSync)(this.sessionPath, `${JSON.stringify(this.state, null, 2)}
+`, "utf-8");
+    this.dirty = false;
+  }
+};
+
+// src/channels/cli/skin.ts
+var CODES = {
+  reset: "\x1B[0m",
+  bold: "\x1B[1m",
+  dim: "\x1B[2m",
+  red: "\x1B[31m",
+  green: "\x1B[32m",
+  yellow: "\x1B[33m",
+  blue: "\x1B[34m",
+  magenta: "\x1B[35m",
+  cyan: "\x1B[36m",
+  gray: "\x1B[90m"
+};
+function detectColor(options) {
+  if (typeof options?.color === "boolean") return options.color;
+  if (process.env.NO_COLOR) return false;
+  if (process.env.FORCE_COLOR) return true;
+  return Boolean(options?.isTty ?? process.stdout.isTTY);
+}
+function makeSkin(options) {
+  const color = detectColor(options);
+  const paint = (name, text) => color ? `${CODES[name]}${text}${CODES.reset}` : text;
+  const section = (title) => paint("bold", title);
+  const statusBlock = (items, title) => {
+    const lines = Object.entries(items).map(([key, value]) => `  ${paint("gray", `${key}:`.padEnd(16))}${value}`);
+    return [title ? section(title) : "", ...lines].filter(Boolean).join("\n");
+  };
+  const table = (headers, rows) => {
+    const widths = headers.map(
+      (header, index) => Math.max(visibleLength(header), ...rows.map((row) => visibleLength(row[index] ?? "")))
+    );
+    const format = (cells) => cells.map((cell, index) => pad(cell, widths[index] ?? 0)).join("  ").trimEnd();
+    if (rows.length === 0) return `${paint("gray", format(headers))}
+${paint("gray", "\uFF08\u65E0\u6570\u636E\uFF09")}`;
+    return [paint("gray", format(headers)), ...rows.map((row) => format(row))].join("\n");
+  };
+  const help = (commands) => {
+    const width = Math.max(...Object.keys(commands).map((command) => command.length));
+    const lines = Object.entries(commands).map(
+      ([command, description]) => `  ${paint("cyan", command.padEnd(width))}  ${description}`
+    );
+    return [section("\u53EF\u7528\u547D\u4EE4\uFF1A"), ...lines, "", "\u63D0\u793A\uFF1A\u6240\u6709 CLI \u5B50\u547D\u4EE4\u5728 REPL \u5185\u4E5F\u53EF\u7528\uFF08\u652F\u6301 --json \u4E0E --confirm\uFF09\u3002"].join("\n");
+  };
+  return {
+    color,
+    paint,
+    banner: (version, address) => [
+      `${paint("magenta", "\u601D\u6E90\u7B14\u8BB0")} ${paint("bold", "siyuan-agent")} ${paint("gray", `v${version}`)} \xB7 \u5185\u6838 ${address}`,
+      paint("gray", "\u8F93\u5165 help \u67E5\u770B\u547D\u4EE4\uFF0Cquit \u9000\u51FA\u3002\u5199\u64CD\u4F5C\u4ECD\u9700 confirm\u3002")
+    ].join("\n"),
+    prompt: (label) => `${paint("cyan", label)} ${paint("gray", ">")} `,
+    success: (message) => `${paint("green", "\u2713")} ${message}`,
+    error: (message) => `${paint("red", "\u2717")} ${message}`,
+    warning: (message) => `${paint("yellow", "!")} ${message}`,
+    info: (message) => `${paint("blue", "\xB7")} ${message}`,
+    section,
+    statusBlock,
+    table,
+    help,
+    goodbye: () => paint("gray", "\u518D\u89C1\u3002")
+  };
+}
+function visibleLength(text) {
+  return text.replace(/\u001b\[[0-9;]*m/g, "").length;
+}
+function pad(text, width) {
+  return text + " ".repeat(Math.max(0, width - visibleLength(text)));
+}
+
+// src/channels/cli/repl.ts
+var REPL_COMMANDS = {
+  "notebook list": "List all notebooks",
+  "notebook create <name>": "Create a notebook",
+  "notebook rename <id> <name>": "Rename a notebook",
+  "notebook remove <id>": "Remove a notebook",
+  "doc create <notebook> <path>": "Create a document with optional --md content",
+  "doc list <notebook> <path>": "List documents at path",
+  "doc tree <notebook> <\u6587\u6863\u8DEF\u5F84\u6216ID>": "\u4EE5\u67D0\u7BC7\u6587\u6863\u4E3A\u6839\u5217\u51FA\u5B50\u6811\uFF08\u5185\u6838\u4E0D\u63A5\u53D7\u6839\u8DEF\u5F84\uFF09",
+  "doc get <id>": "Get document info by ID",
+  "block insert <parent> <data>": "Insert a block (use '-' for stdin)",
+  "block update <id> <data>": "Update a block (use '-' for stdin)",
+  "block delete <id>": "Delete a block",
+  "block get <id>": "Get block kramdown source",
+  "sql <stmt>": "Execute SQL query",
+  "search <query>": "Full-text search",
+  "export md <doc-id>": "Export doc as Markdown",
+  status: "Show connection and session status",
+  help: "Show this help",
+  quit: "Exit REPL"
+};
+var QUIT_WORDS = /* @__PURE__ */ new Set(["quit", "exit", "q", ":q"]);
+var HELP_WORDS = /* @__PURE__ */ new Set(["help", "?", "h"]);
+function promptLabel(state) {
+  return state.currentDocPath || state.currentNotebookName || "siyuan";
+}
+function applyReplAliases(argv) {
+  const [first, second] = argv;
+  if (first === "sql" && argv.length > 2) {
+    return ["sql", argv.slice(1).join(" ")];
+  }
+  if (first === "search" && second !== void 0 && !["blocks", "docs", "tag"].includes(second)) {
+    return ["search", "blocks", argv.slice(1).join(" ")];
+  }
+  if (first === "search" && second === "blocks" && argv.length > 3) {
+    return ["search", "blocks", argv.slice(2).join(" ")];
+  }
+  if (first === "export" && second === "md") {
+    return ["doc", "export_md", ...argv.slice(2)];
+  }
+  if (first === "doc" && second === "get") {
+    return ["doc", "path_by_id", ...argv.slice(2)];
+  }
+  if (first === "block" && second === "insert" && argv.length >= 4) {
+    return ["block", "insert", argv[3], "--parentID", argv[2], ...argv.slice(4)];
+  }
+  const mdIndex = argv.indexOf("--md");
+  if (mdIndex !== -1) {
+    const next = [...argv];
+    next.splice(mdIndex, 1, "--markdown");
+    return next;
+  }
+  return argv;
+}
+async function runRepl(deps) {
+  const input = deps?.input ?? process.stdin;
+  const output = deps?.output ?? process.stdout;
+  const interactive = Boolean(input.isTTY);
+  const skin = makeSkin({ color: deps?.color, isTty: output.isTTY });
+  const session = new SessionManager(deps?.stateDir);
+  const state = session.load();
+  const client = deps?.client ?? new SiYuanClient(resolveSiYuanConfig());
+  const write = (text) => {
+    output.write(`${text}
+`);
+  };
+  const rl = (0, import_node_readline.createInterface)({ input, output, terminal: interactive });
+  const queue = [];
+  let draining = false;
+  let closed = false;
+  let inputClosed = false;
+  let finished = false;
+  let resolveDone = () => {
+  };
+  const done = new Promise((resolve) => {
+    resolveDone = resolve;
+  });
+  const finishIfIdle = () => {
+    if (finished) return;
+    if (!inputClosed) return;
+    if (draining || queue.length > 0) return;
+    finished = true;
+    session.flush();
+    write(skin.goodbye());
+    resolveDone(0);
+  };
+  const handle = async (rawLine) => {
+    const line = rawLine.trim();
+    if (line.length === 0) return;
+    session.update({ history: [...state.history, line] });
+    const lower = line.toLowerCase();
+    if (QUIT_WORDS.has(lower)) {
+      closed = true;
+      rl.close();
+      return;
+    }
+    if (HELP_WORDS.has(lower)) {
+      write(skin.help(REPL_COMMANDS));
+      session.flush();
+      return;
+    }
+    const parsed = parseCliArgs(applyReplAliases(splitReplArgs(line)));
+    const spec = TOOL_SPECS.find((item) => item.name === parsed.tool);
+    if (!spec) {
+      write(skin.error(`\u672A\u77E5\u547D\u4EE4\uFF1A${line}\uFF08\u8F93\u5165 help \u67E5\u770B\u53EF\u7528\u547D\u4EE4\uFF09`));
+      session.flush();
+      return;
+    }
+    if (stdinParams(spec).some((param) => parsed.args[param] === STDIN_SENTINEL)) {
+      write(
+        skin.error(
+          'REPL \u5185\u4E0D\u652F\u6301 `-` \u4ECE stdin \u8BFB\u53D6\uFF08\u4F1A\u541E\u6389\u4F1A\u8BDD\u8F93\u5165\uFF09\uFF1A\u8BF7\u6539\u7528 --markdown "\u6587\u672C"\uFF0C\u6216\u7528\u7BA1\u9053\u8C03\u7528 CLI \u547D\u4EE4\u3002'
+        )
+      );
+      session.flush();
+      return;
+    }
+    const outcome = await dispatchTool(spec, parsed.args, client);
+    if (!outcome.ok) {
+      const { code, message, hint } = outcome.error;
+      write(skin.error(`[${code}] ${message}${hint ? `
+  ${hint}` : ""}`));
+      session.flush();
+      return;
+    }
+    write(
+      parsed.global.json ? JSON.stringify(outcome.result.data ?? { text: outcome.result.text }) : outcome.result.text
+    );
+    const data = outcome.result.data ?? {};
+    if (spec.name === "status") {
+      write(
+        skin.statusBlock({
+          \u5F53\u524D\u7B14\u8BB0\u672C: state.currentNotebookName || "(\u672A\u9009\u62E9)",
+          \u5F53\u524D\u6587\u6863: state.currentDocPath || "(\u672A\u9009\u62E9)"
+        })
+      );
+    }
+    if (spec.name === "doc_create") {
+      session.update({ currentDocId: String(data.id ?? ""), currentDocPath: String(data.path ?? "") });
+    }
+    if (spec.name === "daily_note_create") {
+      session.update({ currentDocId: String(data.id ?? "") });
+    }
+    if (spec.name === "notebook_create") {
+      session.update({ currentNotebookId: String(data.id ?? ""), currentNotebookName: String(data.name ?? "") });
+    }
+    if (spec.name === "notebook_open") {
+      session.update({ currentNotebookId: String(data.notebook ?? "") });
+    }
+    session.flush();
+  };
+  const drain = async () => {
+    if (draining) return;
+    draining = true;
+    while (queue.length > 0 && !closed) {
+      const next = queue.shift();
+      if (next === void 0) break;
+      await handle(next);
+      if (interactive) rl.prompt();
+    }
+    draining = false;
+    finishIfIdle();
+  };
+  rl.on("line", (line) => {
+    queue.push(line);
+  });
+  rl.on("close", () => {
+    inputClosed = true;
+    finishIfIdle();
+  });
+  let version = deps?.version ?? "";
+  if (version.length === 0) {
+    try {
+      version = await client.version();
+    } catch {
+      version = "?";
+    }
+  }
+  write(skin.banner(version, `${client.config.host}:${client.config.port}`));
+  if (interactive) {
+    rl.setPrompt(skin.prompt(promptLabel(state)));
+    rl.prompt();
+  }
+  void drain();
+  return done;
+}
+
+// src/channels/cli/index.ts
 function usage() {
   const lines = TOOL_SPECS.map((spec) => `siyuan-agent ${toCliPath(spec.name).join(" ")} \u2014 ${spec.title}`);
   return [
@@ -1341,6 +2321,9 @@ function usage() {
     "  --token           \u8986\u76D6 API Token",
     "  --config          \u6307\u5B9A\u914D\u7F6E\u6587\u4EF6\u8DEF\u5F84",
     "",
+    "\u5176\u4ED6\uFF1A",
+    "  repl              \u4EA4\u4E92\u5F0F REPL\uFF08\u7B49\u4EF7\u4E8E\u4E0D\u5E26\u53C2\u6570\u8FD0\u884C\uFF09",
+    "",
     "\u547D\u4EE4\uFF1A",
     ...lines
   ].join("\n");
@@ -1348,6 +2331,14 @@ function usage() {
 async function runCli(argv, deps) {
   const writeOut = deps?.stdout ?? ((text) => process.stdout.write(text));
   const writeErr = deps?.stderr ?? ((text) => process.stderr.write(text));
+  if (argv.length === 0 || argv[0] === "repl") {
+    if (!process.stdin.isTTY) {
+      writeErr(`${usage()}
+`);
+      return 1;
+    }
+    return await runRepl({ client: deps?.client });
+  }
   const parsed = parseCliArgs(argv);
   const spec = TOOL_SPECS.find((item) => item.name === parsed.tool);
   if (!spec) {
@@ -1365,7 +2356,8 @@ ${usage()}
       configPath: parsed.global.configPath
     })
   );
-  const outcome = await dispatchTool(spec, parsed.args, client);
+  const args = resolveStdinArgs(spec, parsed.args, deps?.stdin ?? readStdinText);
+  const outcome = await dispatchTool(spec, args, client);
   if (outcome.ok) {
     const text = parsed.global.json ? JSON.stringify(outcome.result.data ?? { text: outcome.result.text }) : outcome.result.text;
     writeOut(`${text}

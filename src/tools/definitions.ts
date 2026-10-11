@@ -1,3 +1,4 @@
+import type { SiYuanClient } from "../core/client.ts";
 import { SiYuanError } from "../core/errors.ts";
 import { renderSqlNotice, renderText, truncateText } from "../core/render.ts";
 import type { BlockOpResult } from "../core/types.ts";
@@ -6,8 +7,11 @@ import type { ToolSpec } from "./types.ts";
 import {
   buildBlockPreview,
   buildDocPreview,
+  buildNotebookPreview,
   requireConfirm,
+  requireConfirmName,
   requireFreshHash,
+  requireIdList,
   shouldDryRun,
 } from "./write-guard.ts";
 
@@ -48,17 +52,18 @@ const readOnlyTools: readonly ToolSpec[] = [
       const connected = await client.ping();
       const version = connected ? await client.version() : "";
       const time = connected ? await client.currentTime() : 0;
-      const { host, port, token } = client.config;
+      const { host, port, token, tokenSource } = client.config;
       const text = [
         `连接：${connected ? "正常" : "不可达"}`,
         `地址：http://${host}:${port}`,
-        `Token：${token ? "已配置" : "未配置"}`,
+        // 只报来源，绝不上显 Token 本身
+        `Token：${token ? `已配置（来源：${tokenSource}）` : "未配置"}`,
         connected ? `内核版本：${version}` : "",
         connected ? `内核时间：${new Date(time).toISOString()}` : "",
       ]
         .filter(Boolean)
         .join("\n");
-      return { text, data: { connected, host, port, hasToken: Boolean(token), version, time } };
+      return { text, data: { connected, host, port, hasToken: Boolean(token), tokenSource, version, time } };
     },
   },
   {
@@ -377,6 +382,136 @@ function parseIdList(raw: unknown): string[] {
   return ids;
 }
 
+/** 解析 JSON 对象参数（接受对象或 JSON 字符串）。用于 conf / replaceTypes。 */
+function parseJsonObject(raw: unknown, label: string): Record<string, unknown> {
+  let parsed: unknown = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} 需要 JSON 对象字符串`, {
+        hint: `例如 {"${label}Key":"value"}`,
+      });
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SiYuanError("SIYUAN_API_ERROR", `${label} 需要 JSON 对象`);
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/** 解析字符串列表参数（接受数组、JSON 数组字符串或逗号分隔字符串；允许为空由调用方判断）。 */
+function parseListParam(raw: unknown, label: string): string[] {
+  if (Array.isArray(raw)) return raw.map((value) => String(value).trim()).filter((value) => value.length > 0);
+
+  const text = String(raw ?? "").trim();
+  if (text.length === 0) return [];
+
+  // 以 [ 开头就必须是合法 JSON 数组：否则旧行为会静默退化成逗号切分，产生垃圾值
+  if (text.startsWith("[")) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} 的 JSON 数组格式非法`, {
+        hint: '例如 ["/a","/b"]；也可以直接用逗号分隔：/a,/b',
+      });
+    }
+    if (!Array.isArray(parsed)) {
+      throw new SiYuanError("SIYUAN_API_ERROR", `${label} 需要 JSON 数组或逗号分隔字符串`);
+    }
+    return parsed.map((value) => String(value).trim()).filter((value) => value.length > 0);
+  }
+
+  return text
+    .split(",")
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+/** 内核支持的替换类型全集（kernel/model/search.go::FindReplaceInBox）。 */
+const ALL_REPLACE_TYPES = [
+  "text",
+  "imgText",
+  "imgTitle",
+  "imgSrc",
+  "aText",
+  "aTitle",
+  "aHref",
+  "code",
+  "em",
+  "strong",
+  "inlineMath",
+  "inlineMemo",
+  "blockRef",
+  "fileAnnotationRef",
+  "kbd",
+  "mark",
+  "s",
+  "sub",
+  "sup",
+  "tag",
+  "u",
+  "docTitle",
+  "codeBlock",
+  "mathBlock",
+  "htmlBlock",
+];
+
+/**
+ * 内核的替换是**按类型逐项 opt-in**（不传 replaceTypes 等于什么都不替换）。
+ * 默认只替换普通文本（text）；传 {"all": true} 才展开为全部类型。
+ */
+function resolveReplaceTypes(raw: unknown): { types: Record<string, boolean>; label: string } {
+  if (raw === undefined || raw === "") {
+    return { types: { text: true }, label: "text（默认只替换普通文本）" };
+  }
+  const parsed = parseJsonObject(raw, "replaceTypes");
+  if (parsed.all === true) {
+    return {
+      types: Object.fromEntries(ALL_REPLACE_TYPES.map((type) => [type, true])),
+      label: `全部类型（${ALL_REPLACE_TYPES.length} 种）`,
+    };
+  }
+  const keys = Object.keys(parsed);
+  return { types: parsed as Record<string, boolean>, label: keys.length > 0 ? keys.join(", ") : "(空，将不会替换任何内容)" };
+}
+
+/**
+ * 按「笔记本 + 路径」解析文档 ID，用于 by-path 工具的存在性校验与预览。
+ *
+ * 注意两种路径不是同一回事（实测）：
+ *  - **hpath**：人类可读路径（如 `/我的数据`），供 getIDsByHPath 使用；
+ *  - **存储路径**：形如 `/<docId>.sy`（文件名是文档 ID，不是标题），供 renameDoc/removeDoc/moveDocs 使用，
+ *    也是 listDocsByPath 返回的 `path` 字段。
+ * 所以先按 hpath 试，失败再用存储路径列父目录匹配——两条路都不猜。
+ */
+async function resolveIdByPath(
+  client: SiYuanClient,
+  notebook: string,
+  path: string,
+): Promise<{ ids: string[] }> {
+  const asHPath = path.replace(/\.sy$/i, "");
+  try {
+    const byHPath = await client.getIDsByHPath(notebook, asHPath);
+    if (byHPath.length > 0) return { ids: byHPath };
+  } catch {
+    // 落到存储路径分支
+  }
+
+  try {
+    const normalized = path.startsWith("/") ? path : `/${path}`;
+    const slash = normalized.lastIndexOf("/");
+    const parent = slash <= 0 ? "/" : normalized.slice(0, slash);
+    const entries = (await client.listDocsByPath(notebook, parent)) as Array<Record<string, unknown>>;
+    const hit = entries.find((entry) => String(entry.path ?? "") === normalized);
+    const id = hit ? String(hit.id ?? "") : "";
+    return { ids: id.length > 0 ? [id] : [] };
+  } catch {
+    return { ids: [] };
+  }
+}
+
 const additiveTools: readonly ToolSpec[] = [
   {
     name: "notebook_create",
@@ -502,6 +637,82 @@ const additiveTools: readonly ToolSpec[] = [
       const attrs = parseAttrs(args.attrs);
       await client.setBlockAttrs(String(args.id), attrs);
       return { text: `已设置 ${String(args.id)} 的属性：${Object.keys(attrs).join(", ")}`, data: { id: args.id, attrs } };
+    },
+  },
+  {
+    name: "notebook_open",
+    title: "打开笔记本",
+    description: "打开（加载）指定笔记本。属运行态变更、不改数据；思源客户端界面会同步显示为已打开。",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const notebook = String(args.notebook);
+      await client.openNotebook(notebook);
+      return { text: `已打开笔记本 ${notebook}`, data: { notebook, opened: true } };
+    },
+  },
+  {
+    name: "notebook_close",
+    title: "关闭笔记本",
+    description:
+      "关闭指定笔记本（仅运行态，数据不动）。若主人正在思源客户端里使用该笔记本，界面会同步变为已关闭。",
+    risk: "additive",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const notebook = String(args.notebook);
+      await client.closeNotebook(notebook);
+      return { text: `已关闭笔记本 ${notebook}（数据未改动）`, data: { notebook, closed: true } };
+    },
+  },
+  {
+    name: "export_resources",
+    title: "导出资源为 zip",
+    description:
+      "把 workspace 内的文件/文件夹打包为 zip，返回 zip 在 workspace 中的相对路径。" +
+      "写在临时导出目录，不改动笔记内容。",
+    risk: "additive",
+    params: {
+      paths: {
+        type: "string",
+        required: true,
+        description: '要导出的路径列表：JSON 数组或逗号分隔，如 ["/conf/appearance/boot"]',
+      },
+      name: { type: "string", description: "导出文件名（不含 .zip）" },
+    },
+    invoke: async (client, args) => {
+      const paths = parseListParam(args.paths, "paths");
+      if (paths.length === 0) {
+        throw new SiYuanError("SIYUAN_API_ERROR", "paths 不能为空", { hint: "至少给一个 workspace 内路径。" });
+      }
+      const zipPath = await client.exportResources(paths, optionalString(args.name));
+      return {
+        text: zipPath ? `已导出：${zipPath}（${paths.length} 个路径）` : "内核未返回导出路径",
+        data: { path: zipPath, paths },
+      };
+    },
+  },
+  {
+    name: "block_fold",
+    title: "折叠块",
+    description: "折叠指定块（只改折叠状态，可逆，不改内容）。",
+    risk: "additive",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const id = String(args.id);
+      await client.foldBlock(id);
+      return { text: `已折叠块 ${id}`, data: { id, folded: true } };
+    },
+  },
+  {
+    name: "block_unfold",
+    title: "展开块",
+    description: "展开指定块（只改折叠状态，可逆）。",
+    risk: "additive",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const id = String(args.id);
+      await client.unfoldBlock(id);
+      return { text: `已展开块 ${id}`, data: { id, folded: false } };
     },
   },
 ];
@@ -658,6 +869,270 @@ const destructiveTools: readonly ToolSpec[] = [
       return {
         text: `已删除文档 ${id}\n删除前位置：\n${preview}\n\n提示：内核已把该文档写入数据历史，可在思源「数据历史」中回滚（受历史保留设置限制）。`,
         data: { id },
+      };
+    },
+  },
+  {
+    name: "doc_rename_by_path",
+    title: "按路径重命名文档（破坏型）",
+    description: "按「笔记本 + 文档路径」重命名文档标题（对齐参考实现）。破坏型：必须 confirm: true；不传则只返回预览。",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "文档路径（相对笔记本，如 /a.sy）" },
+      title: { type: "string", required: true, description: "新的文档标题" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_rename_by_path");
+      const notebook = String(args.notebook);
+      const path = requireName(spec, args, "path");
+      const title = requireName(spec, args, "title");
+      const { ids } = await resolveIdByPath(client, notebook, path);
+      const preview =
+        `笔记本：${notebook}\n文档路径：${path}` +
+        `${ids.length > 0 ? `\n解析到文档 ID：${ids.join(", ")}` : "\n（未能按此路径解析到文档）"}\n新标题：${title}`;
+      requireConfirm(spec, args, preview, ids.length > 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `将重命名为「${title}」`, preview), data: { dryRun: true } };
+      }
+      await client.renameDoc(notebook, path, title);
+      return { text: `已重命名 ${path} 为「${title}」\n${preview}`, data: { notebook, path, title } };
+    },
+  },
+  {
+    name: "doc_remove_by_path",
+    title: "按路径删除文档（破坏型）",
+    description:
+      "按「笔记本 + 文档路径」删除文档（对齐参考实现）。内核会先把文件写入数据历史。破坏型：必须 confirm: true。",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "文档路径（相对笔记本，如 /a.sy）" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_remove_by_path");
+      const notebook = String(args.notebook);
+      const path = requireName(spec, args, "path");
+      const { ids } = await resolveIdByPath(client, notebook, path);
+      const preview =
+        `笔记本：${notebook}\n文档路径：${path}` +
+        `${ids.length > 0 ? `\n解析到文档 ID：${ids.join(", ")}` : "\n（未能按此路径解析到文档）"}`;
+      requireConfirm(spec, args, preview, ids.length > 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "将删除该文档", preview), data: { dryRun: true } };
+      }
+      await client.removeDoc(notebook, path);
+      return {
+        text: `已删除文档 ${path}\n${preview}\n\n提示：内核已把该文档写入数据历史，可在思源「数据历史」中回滚。`,
+        data: { notebook, path },
+      };
+    },
+  },
+  {
+    name: "doc_move_by_path",
+    title: "按路径移动文档（破坏型）",
+    description: "按路径把一个或多个文档移动到目标笔记本/路径（对齐参考实现）。破坏型：必须 confirm: true。",
+    risk: "destructive",
+    params: {
+      fromPaths: { type: "string", required: true, description: "源文档路径列表：JSON 数组或逗号分隔" },
+      toNotebook: { type: "string", required: true, description: "目标笔记本 ID" },
+      toPath: { type: "string", required: true, description: "目标目录（**必须已存在**；根目录用 /）" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_move_by_path");
+      const fromPaths = parseListParam(args.fromPaths, "fromPaths");
+      if (fromPaths.length === 0) {
+        throw new SiYuanError("SIYUAN_API_ERROR", "fromPaths 不能为空", { hint: "给出至少一个源文档路径。" });
+      }
+      const toNotebook = requireName(spec, args, "toNotebook");
+      const toPath = requireName(spec, args, "toPath");
+
+      // 内核不会自动创建目录，而失败时只报晦涩的 OS 错误（实测：open …\子目录: The system cannot find the file specified.）
+      // 所以这里先做一次只读探测，把错误翻译成可操作的提示。
+      try {
+        await client.listDocsByPath(toNotebook, toPath);
+      } catch {
+        throw new SiYuanError("SIYUAN_NOT_FOUND", `目标目录不存在：${toNotebook} 的 ${toPath}`,
+          { hint: "目标目录必须已存在（根目录用 /）；若要用新层级，先用 doc_create 建好该层级的文档。" },
+        );
+      }
+
+      const preview =
+        `将移动 ${fromPaths.length} 个文档：\n${fromPaths.join("\n")}\n` +
+        `目标笔记本：${toNotebook}\n目标路径：${toPath}`;
+      requireConfirm(spec, args, preview, true);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "将移动这些文档", preview), data: { dryRun: true, fromPaths } };
+      }
+      await client.moveDocs(fromPaths, toNotebook, toPath);
+      return { text: `已移动 ${fromPaths.length} 个文档到 ${toNotebook}${toPath}`, data: { fromPaths, toNotebook, toPath } };
+    },
+  },
+  {
+    name: "notebook_rename",
+    title: "重命名笔记本（破坏型）",
+    description: "覆盖笔记本名称。破坏型：必须 confirm: true；预览会给出当前名称。",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      name: { type: "string", required: true, description: "新的笔记本名称" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_rename");
+      const notebook = String(args.notebook);
+      const name = requireName(spec, args, "name");
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `将改名为「${name}」`, info.preview), data: { dryRun: true, exists: info.exists } };
+      }
+      await client.renameNotebook(notebook, name);
+      return { text: `已把笔记本改名为「${name}」（原名称：${info.name}）`, data: { notebook, name, previousName: info.name } };
+    },
+  },
+  {
+    name: "notebook_icon_set",
+    title: "设置笔记本图标（破坏型）",
+    description:
+      "覆盖笔记本图标（Unicode 表情码点或图标资源名）。破坏型：必须 confirm: true；预览会给出当前图标。",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      icon: { type: "string", required: true, description: "新图标（如 1f4d6 这样的表情码点，或图标资源名）" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_icon_set");
+      const notebook = String(args.notebook);
+      const icon = requireName(spec, args, "icon");
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `将图标改为「${icon}」`, info.preview), data: { dryRun: true, exists: info.exists } };
+      }
+      await client.setNotebookIcon(notebook, icon);
+      return {
+        text: `已设置笔记本图标为「${icon}」（原图标：${info.icon || "未设置"}）`,
+        data: { notebook, icon, previousIcon: info.icon },
+      };
+    },
+  },
+  {
+    name: "notebook_conf_set",
+    title: "设置笔记本配置（破坏型）",
+    description:
+      "覆盖笔记本配置（如 dailyNoteSavePath、refCreateSavePath、docCreateSavePath 等）。" +
+      "破坏型：必须 confirm: true；预览会给出当前配置要点。建议先用 notebook_conf_get 读取现有配置再部分修改。",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      conf: {
+        type: "string",
+        required: true,
+        description: '要写入的配置 JSON 对象字符串，如 {"dailyNoteSavePath":"/daily note/{{now | date \\"2006-01-02\\"}}"}',
+      },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_conf_set");
+      const notebook = String(args.notebook);
+      const conf = parseJsonObject(args.conf, "conf");
+      const info = await buildNotebookPreview(client, notebook);
+      const preview = `${info.preview}\n\n将写入的配置：\n${Object.entries(conf)
+        .map(([key, value]) => `- ${key}: ${String(value)}`)
+        .join("\n")}`;
+      requireConfirm(spec, args, preview, info.exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "将覆盖笔记本配置", preview), data: { dryRun: true, exists: info.exists } };
+      }
+      const saved = await client.setNotebookConf(notebook, conf);
+      return { text: `已更新笔记本配置（${Object.keys(conf).join(", ")}）\n${preview}`, data: { notebook, conf, saved } };
+    },
+  },
+  {
+    name: "notebook_remove",
+    title: "删除笔记本（最高风险）",
+    description:
+      "删除整个笔记本（含其全部文档）。除 confirm: true 外，**还必须传 confirmName**，且其值必须与笔记本当前名称逐字一致。" +
+      "预览会给出名称与文档数；不一致时报 SIYUAN_CONFIRM_MISMATCH。不传 confirm 时只返回预览。",
+    risk: "destructive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      confirmName: { type: "string", required: true, description: "二次确认：必须逐字填写笔记本当前名称" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("notebook_remove");
+      const notebook = String(args.notebook);
+      const info = await buildNotebookPreview(client, notebook);
+      requireConfirm(spec, args, info.preview, info.exists);
+      if (shouldDryRun(args)) {
+        return {
+          text: previewText(spec, `将删除整个笔记本（含 ${info.docCount} 篇文档）`, info.preview),
+          data: { dryRun: true, docCount: info.docCount },
+        };
+      }
+      requireConfirmName(args, info.name, "删除笔记本");
+      await client.removeNotebook(notebook);
+      return {
+        text: `已删除笔记本「${info.name}」（含 ${info.docCount} 篇文档）\n${info.preview}`,
+        data: { notebook, name: info.name, docCount: info.docCount },
+      };
+    },
+  },
+  {
+    name: "find_replace",
+    title: "批量替换内容（破坏型）",
+    description:
+      "在**指定块**内把文本 k 替换为 r（对齐参考实现）。为避免全库误替换，ids 必须非空、且 k 与 r 都不能为空字符串。" +
+      "内核的替换是按类型逐项生效的，本工具默认只替换**普通文本**（text）；需要连代码块、标题等一起替换时传 replaceTypes \"{\\\"all\\\":true}\" 或指定类型集合。" +
+      "破坏型：必须 confirm: true；不传则只返回预览。",
+    risk: "destructive",
+    params: {
+      k: { type: "string", required: true, description: "要查找的文本" },
+      r: { type: "string", required: true, description: "替换为的文本（不支持空串/删除式替换）" },
+      ids: {
+        type: "string",
+        required: true,
+        description: "目标块 ID 列表：JSON 数组或逗号分隔；**不允许为空**（禁止全库替换）",
+      },
+      replaceTypes: {
+        type: "string",
+        description:
+          '可选。默认 {"text":true}（只替换普通文本）；传 {"all":true} 替换全部 25 种类型，或自定义如 {"text":true,"code":true}',
+      },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("find_replace");
+      const k = requireName(spec, args, "k");
+      const r = requireName(spec, args, "r");
+      const ids = requireIdList(args, "ids");
+      const replaceTypes = resolveReplaceTypes(args.replaceTypes);
+      const preview =
+        `将在 ${ids.length} 个块中把「${k}」替换为「${r}」\n` +
+        `替换类型：${replaceTypes.label}\n` +
+        `目标块：${ids.slice(0, 10).join(", ")}${ids.length > 10 ? " …" : ""}`;
+      requireConfirm(spec, args, preview, true);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "将执行批量替换", preview), data: { dryRun: true, ids } };
+      }
+      await client.findReplace(k, r, ids, replaceTypes.types);
+      return {
+        text: `已在 ${ids.length} 个块中把「${k}」替换为「${r}」（类型：${replaceTypes.label}）\n${preview}`,
+        data: { k, r, ids, replaceTypes: replaceTypes.types },
       };
     },
   },

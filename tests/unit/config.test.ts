@@ -19,7 +19,7 @@ describe("resolveSiYuanConfig", () => {
       readFileSync: () => JSON.stringify({ host: "1.1.1.1", port: 1111, token: "tok-file" }),
       homeDir: "C:/home/u",
     });
-    expect(cfg).toEqual({ host: "10.0.0.2", port: 7000, token: "tok-env", timeoutMs: 30000 });
+    expect(cfg).toEqual({ host: "10.0.0.2", port: 7000, token: "tok-env", timeoutMs: 30000, tokenSource: "env" });
   });
 
   it("显式参数优先于环境变量与文件", () => {
@@ -27,7 +27,7 @@ describe("resolveSiYuanConfig", () => {
       { host: "127.0.0.9", port: 9999, token: "tok-arg" },
       { env: { SIYUAN_HOST: "10.0.0.2", SIYUAN_PORT: "7000", SIYUAN_TOKEN: "tok-env" }, ...noFile },
     );
-    expect(cfg).toEqual({ host: "127.0.0.9", port: 9999, token: "tok-arg", timeoutMs: 30000 });
+    expect(cfg).toEqual({ host: "127.0.0.9", port: 9999, token: "tok-arg", timeoutMs: 30000, tokenSource: "arg" });
   });
 
   it("配置文件可带 BOM", () => {

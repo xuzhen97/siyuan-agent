@@ -76,6 +76,16 @@ describe("只读工具的 invoke 映射", () => {
     expect(out?.text).toContain("未配置");
   });
 
+  it("status 报出 Token 来源，但绝不上显 Token 本身", async () => {
+    const { client } = fakeClient({
+      config: { host: "127.0.0.1", port: 6806, token: "super-secret-token", timeoutMs: 30000, tokenSource: "env" },
+    });
+    const out = await findToolSpec("status")?.invoke(client, {});
+    expect(out?.text).toContain("来源：env");
+    expect(out?.text).not.toContain("super-secret-token");
+    expect(out?.data).toMatchObject({ hasToken: true, tokenSource: "env" });
+  });
+
   it("notebook_list 渲染条数", async () => {
     const { client } = fakeClient();
     const out = await findToolSpec("notebook_list")?.invoke(client, {});

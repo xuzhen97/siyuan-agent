@@ -2,7 +2,7 @@
 
 把思源（SiYuan）笔记知识库接入 Agent 与终端的基础项目：**一份工具定义真源，三条消费通道**。
 
-- **32 条工具**（只读 19 + 写 13），覆盖笔记本（含配置读取）、文档树、块 kramdown、全文检索、标签、SQL 查询、Markdown 导出、日记，以及写入/修改/删除笔记与块。
+- **45 条工具**（只读 19 + 写 26），覆盖笔记本（含配置读取）、文档树、块 kramdown、全文检索、标签、SQL 查询、Markdown 导出、日记，以及写入/修改/删除笔记与块。
 - **零运行时依赖**：只用 Node 内置能力（原生 `fetch`、`node:` 模块）。
 - **三条通道共用同一份真源**：`src/tools/definitions.ts` → Pi 工具 / VCP 命令 / CLI 子命令（详见 [ADR-0001](./adr/0001-single-tool-definition-source-and-channel-generation.md)）。
 
@@ -43,7 +43,30 @@ node dist/cli.cjs block delete <块ID>          # 破坏型：不给 confirm 只
 node dist/cli.cjs block delete <块ID> --confirm # 确认后执行
 ```
 
-`node dist/cli.cjs --help`（或任意未知命令）会打印全部 30 条命令路径。
+`node dist/cli.cjs --help`（或任意未知命令）会打印全部 45 条命令路径。
+
+**从 stdin 读取内容**（对齐参考实现：参数写 `-` 即从标准输入读）：
+
+```bash
+cat note.md | node dist/cli.cjs doc create <笔记本ID> /从管道创建 --markdown -
+echo "追加内容" | node dist/cli.cjs block insert <文档ID> -          # data 为 - 或省略时读 stdin
+cat 新内容.md | node dist/cli.cjs block update <块ID> - --confirm
+```
+
+**交互式 REPL**（对齐参考实现的 `repl`）：不带参数运行，或 `node dist/cli.cjs repl`（需 TTY；管道/CI 下会改为打印用法）。
+
+```text
+$ node dist/cli.cjs
+思源笔记 siyuan-agent v0.1.0 · 内核 127.0.0.1:6806
+输入 help 查看命令，quit 退出。写操作仍需 confirm。
+siyuan > notebook list
+siyuan > doc create <笔记本ID> /新文档 --markdown "# 内容"
+siyuan > sql SELECT id, hpath FROM blocks WHERE type = 'd' LIMIT 20
+siyuan > status
+siyuan > quit
+```
+
+REPL 支持全部 CLI 子命令（含 `--json` 与 `--confirm`），并把会话上下文（当前笔记本/当前文档）与命令历史持久化到 `~/.siyuan-agent/session.json`（历史保留最近 200 条）。**写操作在 REPL 里同样必须先 `confirm`**，不受交互模式影响。
 
 ## 配置
 
@@ -64,8 +87,8 @@ node dist/cli.cjs block delete <块ID> --confirm # 确认后执行
 
 见 [ADR-0004：写通道与统一确认安全边界](./adr/0004-write-channel-and-unified-confirmation-boundary.md)。
 
-- **增量型写工具**（`notebook_create` / `doc_create` / `daily_note_create` / `block_append` / `block_prepend` / `block_insert` / `block_attrs_set`）可直接调用。
-- **破坏型写工具**（`block_update` / `block_delete` / `block_move` / `doc_rename` / `doc_move` / `doc_remove`）**必须显式传 `confirm: true`**；不传时只返回**预览**并拒绝执行（`SIYUAN_CONFIRM_REQUIRED`）。
+- **增量型写工具**（`notebook_create` / `notebook_open` / `notebook_close` / `doc_create` / `daily_note_create` / `block_append` / `block_prepend` / `block_insert` / `block_fold` / `block_unfold` / `block_attrs_set` / `export_resources`）可直接调用。
+- **破坏型写工具**（`block_update` / `block_delete` / `block_move` / `doc_rename` / `doc_move` / `doc_remove` / `doc_rename_by_path` / `doc_remove_by_path` / `doc_move_by_path` / `notebook_rename` / `notebook_icon_set` / `notebook_conf_set` / `notebook_remove` / `find_replace`）**必须显式传 `confirm: true`**；不传时只返回**预览**并拒绝执行（`SIYUAN_CONFIRM_REQUIRED`）。其中 `notebook_remove`（删整库）还须传 `confirmName` 且与笔记本当前名称逐字一致（`SIYUAN_CONFIRM_MISMATCH`）；`find_replace` 的 `ids` 不允许为空（禁止全库替换）。
 - 可选 `dryRun: true` 只预览不写；`block_update` / `block_delete` 支持 `expectedHash` 做乐观并发校验（不匹配报 `SIYUAN_STALE_TARGET`）；`block_update` 默认 `lockType: true`（块类型变化即拒绝）。
 - **SQL 永远只读**：仅单条 `SELECT` / `WITH`，其余一律拦为 `SIYUAN_READONLY_BLOCKED`。
 - 删文档会在内核侧先写入数据历史（可在思源「数据历史」回滚，受历史保留设置限制）。

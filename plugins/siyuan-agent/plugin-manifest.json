@@ -3,7 +3,7 @@
   "name": "SiYuanAgent",
   "displayName": "思源笔记读写桥",
   "version": "0.1.0",
-  "description": "读写思源（SiYuan）笔记知识库：笔记本、文档树、块内容、全文检索、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块（破坏型操作强制 confirm 确认）。32 条工具，同步 stdio 架构，零 npm 依赖。",
+  "description": "读写思源（SiYuan）笔记知识库：笔记本、文档树、块内容、全文检索、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块（破坏型操作强制 confirm 确认）。45 条工具，同步 stdio 架构，零 npm 依赖。",
   "author": "xuzhen97",
   "pluginType": "synchronous",
   "entryPoint": {
@@ -169,6 +169,31 @@
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAttrsSet「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nattrs:「始」{\"custom-status\":\"done\"}「末」\n<<<[END_TOOL_REQUEST]>>>"
       },
       {
+        "command": "NotebookOpen",
+        "description": "功能: 打开（加载）指定笔记本。属运行态变更、不改数据；思源客户端界面会同步显示为已打开。\n风险: 增量型（只增不改）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n`command` 固定为 NotebookOpen，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookOpen「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookOpen「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookClose",
+        "description": "功能: 关闭指定笔记本（仅运行态，数据不动）。若主人正在思源客户端里使用该笔记本，界面会同步变为已关闭。\n风险: 增量型（只增不改）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n`command` 固定为 NotebookClose，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookClose「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookClose「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "ExportResources",
+        "description": "功能: 把 workspace 内的文件/文件夹打包为 zip，返回 zip 在 workspace 中的相对路径。写在临时导出目录，不改动笔记内容。\n风险: 增量型（只增不改）\n参数:\n- paths: (必填) 要导出的路径列表：JSON 数组或逗号分隔，如 [\"/conf/appearance/boot\"]\n- name: (可选) 导出文件名（不含 .zip）\n`command` 固定为 ExportResources，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」ExportResources「末」,\npaths:「始」值「末」,\nname:「始」我的新笔记本「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」ExportResources「末」,\npaths:「始」值「末」,\nname:「始」我的新笔记本「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockFold",
+        "description": "功能: 折叠指定块（只改折叠状态，可逆，不改内容）。\n风险: 增量型（只增不改）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n`command` 固定为 BlockFold，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockFold「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockFold「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockUnfold",
+        "description": "功能: 展开指定块（只改折叠状态，可逆）。\n风险: 增量型（只增不改）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n`command` 固定为 BlockUnfold，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockUnfold「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockUnfold「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
         "command": "BlockUpdate",
         "description": "功能: 用新内容整体覆盖指定块（内核 updateBlock 是覆盖语义）。破坏型：必须 confirm: true；默认 lockType 为 true，块类型变化会被拒绝。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- data: (必填) 新的块内容\n- dataType: (可选) 数据类型：markdown\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n- expectedHash: (可选) 可选乐观并发校验：传入目标的当前 blocks hash，不一致则拒绝覆盖\n`command` 固定为 BlockUpdate，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockUpdate「末」,\nid:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」,\nexpectedHash:「始」adbd55e「末」\n<<<[END_TOOL_REQUEST]>>>",
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockUpdate「末」,\nid:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」,\nexpectedHash:「始」adbd55e「末」\n<<<[END_TOOL_REQUEST]>>>"
@@ -197,6 +222,46 @@
         "command": "DocRemove",
         "description": "功能: 删除文档。破坏型：必须 confirm: true。内核会先把文档写入数据历史（数据历史 中可回滚，受历史保留设置限制）。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocRemove，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRemove「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
         "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRemove「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocRenameByPath",
+        "description": "功能: 按「笔记本 + 文档路径」重命名文档标题（对齐参考实现）。破坏型：必须 confirm: true；不传则只返回预览。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (必填) 文档路径（相对笔记本，如 /a.sy）\n- title: (必填) 新的文档标题\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocRenameByPath，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRenameByPath「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\ntitle:「始」新的文档标题「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRenameByPath「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\ntitle:「始」新的文档标题「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocRemoveByPath",
+        "description": "功能: 按「笔记本 + 文档路径」删除文档（对齐参考实现）。内核会先把文件写入数据历史。破坏型：必须 confirm: true。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (必填) 文档路径（相对笔记本，如 /a.sy）\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocRemoveByPath，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRemoveByPath「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRemoveByPath「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocMoveByPath",
+        "description": "功能: 按路径把一个或多个文档移动到目标笔记本/路径（对齐参考实现）。破坏型：必须 confirm: true。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- fromPaths: (必填) 源文档路径列表：JSON 数组或逗号分隔\n- toNotebook: (必填) 目标笔记本 ID\n- toPath: (必填) 目标目录（**必须已存在**；根目录用 /）\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocMoveByPath，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocMoveByPath「末」,\nfromPaths:「始」值「末」,\ntoNotebook:「始」值「末」,\ntoPath:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocMoveByPath「末」,\nfromPaths:「始」值「末」,\ntoNotebook:「始」值「末」,\ntoPath:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookRename",
+        "description": "功能: 覆盖笔记本名称。破坏型：必须 confirm: true；预览会给出当前名称。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- name: (必填) 新的笔记本名称\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 NotebookRename，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookRename「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nname:「始」我的新笔记本「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookRename「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nname:「始」我的新笔记本「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookIconSet",
+        "description": "功能: 覆盖笔记本图标（Unicode 表情码点或图标资源名）。破坏型：必须 confirm: true；预览会给出当前图标。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- icon: (必填) 新图标（如 1f4d6 这样的表情码点，或图标资源名）\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 NotebookIconSet，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookIconSet「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nicon:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookIconSet「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nicon:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookConfSet",
+        "description": "功能: 覆盖笔记本配置（如 dailyNoteSavePath、refCreateSavePath、docCreateSavePath 等）。破坏型：必须 confirm: true；预览会给出当前配置要点。建议先用 notebook_conf_get 读取现有配置再部分修改。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- conf: (必填) 要写入的配置 JSON 对象字符串，如 {\"dailyNoteSavePath\":\"/daily note/{{now | date \\\"2006-01-02\\\"}}\"}\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 NotebookConfSet，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookConfSet「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nconf:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookConfSet「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nconf:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookRemove",
+        "description": "功能: 删除整个笔记本（含其全部文档）。除 confirm: true 外，**还必须传 confirmName**，且其值必须与笔记本当前名称逐字一致。预览会给出名称与文档数；不一致时报 SIYUAN_CONFIRM_MISMATCH。不传 confirm 时只返回预览。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- confirmName: (必填) 二次确认：必须逐字填写笔记本当前名称\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 NotebookRemove，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookRemove「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nconfirmName:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookRemove「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\nconfirmName:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "FindReplace",
+        "description": "功能: 在**指定块**内把文本 k 替换为 r（对齐参考实现）。为避免全库误替换，ids 必须非空、且 k 与 r 都不能为空字符串。内核的替换是按类型逐项生效的，本工具默认只替换**普通文本**（text）；需要连代码块、标题等一起替换时传 replaceTypes \"{\\\"all\\\":true}\" 或指定类型集合。破坏型：必须 confirm: true；不传则只返回预览。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- k: (必填) 要查找的文本\n- r: (必填) 替换为的文本（不支持空串/删除式替换）\n- ids: (必填) 目标块 ID 列表：JSON 数组或逗号分隔；**不允许为空**（禁止全库替换）\n- replaceTypes: (可选) 可选。默认 {\"text\":true}（只替换普通文本）；传 {\"all\":true} 替换全部 25 种类型，或自定义如 {\"text\":true,\"code\":true}\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 FindReplace，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」FindReplace「末」,\nk:「始」会议「末」,\nr:「始」值「末」,\nids:「始」值「末」,\nreplaceTypes:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」FindReplace「末」,\nk:「始」会议「末」,\nr:「始」值「末」,\nids:「始」值「末」,\nreplaceTypes:「始」值「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
       }
     ]
   }

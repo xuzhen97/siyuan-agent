@@ -53,14 +53,14 @@ describe("toJsonSchema", () => {
 });
 
 describe("registerSiYuanTools", () => {
-  it("注册 32 条工具且名称带 siyuan_ 前缀", () => {
+  it("注册 45 条工具且名称带 siyuan_ 前缀", () => {
     const { pi, tools } = recordingPi();
     const { client } = fakeClient();
     const count = registerSiYuanTools(pi, { client });
 
     expect(count).toBe(TOOL_SPECS.length);
-    expect(count).toBe(32);
-    expect(tools).toHaveLength(32);
+    expect(count).toBe(45);
+    expect(tools).toHaveLength(45);
     for (const tool of tools) expect(tool.name.startsWith("siyuan_")).toBe(true);
     expect(tools.map((t) => t.name)).toContain("siyuan_notebook_list");
     expect(tools.map((t) => t.name)).toContain("siyuan_block_delete");
@@ -127,7 +127,7 @@ describe("验证任务 V2：pi 加载器接受本扩展（跨目录 TS 导入）
 
     expect(result.errors).toEqual([]);
     const names = result.extensions.flatMap((extension) => [...extension.tools.keys()]);
-    expect(names).toHaveLength(32);
+    expect(names).toHaveLength(45);
     expect(names).toContain("siyuan_notebook_list");
   }, 30000);
 });

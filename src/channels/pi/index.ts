@@ -12,11 +12,9 @@ export { toJsonSchema } from "./schema.ts";
 /** Pi 侧参数 schema 类型从公开 API 推导，避免为本项目引入 typebox 依赖。 */
 type PiToolDefinition = Parameters<ExtensionAPI["registerTool"]>[0];
 
-let cachedClient: SiYuanClient | undefined;
-
-function defaultClient(): SiYuanClient {
-  cachedClient ??= new SiYuanClient(resolveSiYuanConfig());
-  return cachedClient;
+/** 每次调用重新解析配置：这样改了（系统/用户/进程）环境变量或配置文件后，无需 /reload 即生效。 */
+function freshClient(): SiYuanClient {
+  return new SiYuanClient(resolveSiYuanConfig());
 }
 
 const RISK_SNIPPET: Record<Risk, string> = {
@@ -46,7 +44,7 @@ export function registerSiYuanTools(pi: ExtensionAPI, deps?: { client?: SiYuanCl
       // SAFETY: toJsonSchema 产出标准 JSON Schema，与 TypeBox TSchema 的结构兼容；此处只做类型转换，无运行期改写。
       parameters: toJsonSchema(spec.params) as unknown as PiToolDefinition["parameters"],
       execute: async (_toolCallId, params) => {
-        const client = deps?.client ?? defaultClient();
+        const client = deps?.client ?? freshClient();
         const outcome = await dispatchTool(spec, (params ?? {}) as Record<string, unknown>, client);
 
         if (outcome.ok) {

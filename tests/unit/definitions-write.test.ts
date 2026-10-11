@@ -19,6 +19,19 @@ const WRITE_METHODS = [
   "renameDocByID",
   "moveDocsByID",
   "removeDocByID",
+  "openNotebook",
+  "closeNotebook",
+  "removeNotebook",
+  "renameNotebook",
+  "setNotebookIcon",
+  "setNotebookConf",
+  "exportResources",
+  "foldBlock",
+  "unfoldBlock",
+  "renameDoc",
+  "removeDoc",
+  "moveDocs",
+  "findReplace",
 ];
 
 const ADDITIVE = [
@@ -29,6 +42,11 @@ const ADDITIVE = [
   "block_prepend",
   "block_insert",
   "block_attrs_set",
+  "notebook_open",
+  "notebook_close",
+  "export_resources",
+  "block_fold",
+  "block_unfold",
 ];
 
 const DESTRUCTIVE = [
@@ -38,6 +56,14 @@ const DESTRUCTIVE = [
   "doc_rename",
   "doc_move",
   "doc_remove",
+  "doc_rename_by_path",
+  "doc_remove_by_path",
+  "doc_move_by_path",
+  "notebook_rename",
+  "notebook_icon_set",
+  "notebook_conf_set",
+  "notebook_remove",
+  "find_replace",
 ];
 
 /**
@@ -50,8 +76,8 @@ const invoke = (name: string) => (client: SiYuanClient, args: Record<string, unk
 const writeCalls = (calls: FakeCall[]) => calls.filter((c) => WRITE_METHODS.includes(c.fn));
 
 describe("写工具清单与风险级（ADR-0004）", () => {
-  it("总数为 32，增量型 7 条、破坏型 6 条，名称正确", () => {
-    expect(TOOL_SPECS).toHaveLength(32);
+  it("总数为 45（对齐参考实现的 45 个端点），增量型 12 条、破坏型 14 条，名称正确", () => {
+    expect(TOOL_SPECS).toHaveLength(45);
     expect(TOOL_SPECS.filter((s) => s.risk === "additive").map((s) => s.name)).toEqual(ADDITIVE);
     expect(TOOL_SPECS.filter((s) => s.risk === "destructive").map((s) => s.name)).toEqual(DESTRUCTIVE);
   });

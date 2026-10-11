@@ -52,6 +52,7 @@ compatibility: 需要本机或可访问的思源内核在运行（默认 http://
 - **closed 笔记本**：`notebook_list` 中 `closed: true` 的笔记本可能无法读取内容；此时请用户先在思源中打开该笔记本再重试。
 - **ID 形状**：块/文档 ID 形如 `20210817205410-2kvfpfn`（时间戳 + 随机后缀），不要自行构造。
 - **连接失败**：`SIYUAN_UNREACHABLE` 表示内核未启动或地址端口不对；`SIYUAN_AUTH` 表示 Token 缺失或错误。
+- **长内容用 stdin**：CLI 下参数写 `-` 即从标准输入读（`doc create … --markdown -`；`block insert`/`block update` 的 data 为 `-` 或省略）。REPL 内不支持 `-`（会吞掉会话输入），改写 `--markdown "文本"`。
 - **Windows Git Bash**：以 `/` 开头的参数会被 MSYS 改写成 Windows 路径（例如 `/2026…sy` 变成 `C:\Program Files\Git\…`），传给 `doc_tree` 会得到内核报错。在 Git Bash 下优先用**文档 ID** 而不是带 `/` 的路径（或设 `MSYS_NO_PATHCONV=1`）。
 
 ## 命令表
@@ -85,10 +86,23 @@ compatibility: 需要本机或可访问的思源内核在运行（默认 http://
 | `block_prepend` | `BlockPrepend` | parentID, data, dataType? | 前置块 |
 | `block_insert` | `BlockInsert` | data, dataType?, parentID?, previousID?, nextID? | 插入块 |
 | `block_attrs_set` | `BlockAttrsSet` | id, attrs | 设置块属性 |
+| `notebook_open` | `NotebookOpen` | notebook | 打开笔记本 |
+| `notebook_close` | `NotebookClose` | notebook | 关闭笔记本 |
+| `export_resources` | `ExportResources` | paths, name? | 导出资源为 zip |
+| `block_fold` | `BlockFold` | id | 折叠块 |
+| `block_unfold` | `BlockUnfold` | id | 展开块 |
 | `block_update` | `BlockUpdate` | id, data, dataType?, confirm?, dryRun?, expectedHash? | 改写块（破坏型） |
 | `block_delete` | `BlockDelete` | id, confirm?, dryRun?, expectedHash? | 删除块（破坏型） |
 | `block_move` | `BlockMove` | id, confirm?, parentID?, previousID?, dryRun? | 移动块（破坏型） |
 | `doc_rename` | `DocRename` | id, title, confirm?, dryRun? | 重命名文档（破坏型） |
 | `doc_move` | `DocMove` | fromIDs, toID, confirm?, dryRun? | 移动文档（破坏型） |
 | `doc_remove` | `DocRemove` | id, confirm?, dryRun? | 删除文档（破坏型） |
+| `doc_rename_by_path` | `DocRenameByPath` | notebook, path, title, confirm?, dryRun? | 按路径重命名文档（破坏型） |
+| `doc_remove_by_path` | `DocRemoveByPath` | notebook, path, confirm?, dryRun? | 按路径删除文档（破坏型） |
+| `doc_move_by_path` | `DocMoveByPath` | fromPaths, toNotebook, toPath, confirm?, dryRun? | 按路径移动文档（破坏型） |
+| `notebook_rename` | `NotebookRename` | notebook, name, confirm?, dryRun? | 重命名笔记本（破坏型） |
+| `notebook_icon_set` | `NotebookIconSet` | notebook, icon, confirm?, dryRun? | 设置笔记本图标（破坏型） |
+| `notebook_conf_set` | `NotebookConfSet` | notebook, conf, confirm?, dryRun? | 设置笔记本配置（破坏型） |
+| `notebook_remove` | `NotebookRemove` | notebook, confirmName, confirm?, dryRun? | 删除笔记本（最高风险） |
+| `find_replace` | `FindReplace` | k, r, ids, replaceTypes?, confirm?, dryRun? | 批量替换内容（破坏型） |
 <!-- END GENERATED -->

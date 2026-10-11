@@ -53,6 +53,15 @@ describe("parseCliArgs", () => {
     expect(parseCliArgs(["block", "delete", "b1", "--dryRun"]).args.dryRun).toBe(true);
   });
 
+  it("参考实现的短选项名（--parent/--previous/--next/--data-type）与本项目写法都收", () => {
+    expect(parseCliArgs(["block", "insert", "x", "--parent", "b1"]).args.parentID).toBe("b1");
+    expect(parseCliArgs(["block", "insert", "x", "--parentID", "b1"]).args.parentID).toBe("b1");
+    expect(parseCliArgs(["block", "insert", "x", "--previous", "b2"]).args.previousID).toBe("b2");
+    expect(parseCliArgs(["block", "insert", "x", "--next", "b3"]).args.nextID).toBe("b3");
+    expect(parseCliArgs(["block", "insert", "x", "--data-type", "dom"]).args.dataType).toBe("dom");
+    expect(parseCliArgs(["block", "insert", "x", "--dataType", "dom"]).args.dataType).toBe("dom");
+  });
+
   it("布尔旗标只需出现即为 true，也接受显式 false", () => {
     expect(parseCliArgs(["block", "delete", "b1", "--confirm"]).args.confirm).toBe(true);
     expect(parseCliArgs(["block", "delete", "b1", "--confirm", "false"]).args.confirm).toBe(false);
@@ -159,11 +168,11 @@ describe("CLI 制品端到端（真实进程退出码，由 pnpm build:cli 生�
 });
 
 describe("usage", () => {
-  it("列出全部 32 条工具的命令路径", () => {
+  it("列出全部 45 条工具的命令路径", () => {
     const text = usage();
     expect(text).toContain("siyuan-agent notebook list");
     expect(text).toContain("siyuan-agent sql");
     expect(text).toContain("siyuan-agent block delete");
-    expect(text.split("\n").filter((line) => line.startsWith("siyuan-agent "))).toHaveLength(32);
+    expect(text.split("\n").filter((line) => line.startsWith("siyuan-agent "))).toHaveLength(45);
   });
 });
