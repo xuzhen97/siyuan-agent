@@ -1,0 +1,1253 @@
+"use strict";
+var __defProp = Object.defineProperty;
+var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+var __copyProps = (to, from, except, desc) => {
+  if (from && typeof from === "object" || typeof from === "function") {
+    for (let key of __getOwnPropNames(from))
+      if (!__hasOwnProp.call(to, key) && key !== except)
+        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+  }
+  return to;
+};
+var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+// src/channels/vcp/index.ts
+var vcp_exports = {};
+__export(vcp_exports, {
+  errorResponse: () => errorResponse,
+  handleVcpRequest: () => handleVcpRequest,
+  main: () => main,
+  normalizeVcpArgs: () => normalizeVcpArgs
+});
+module.exports = __toCommonJS(vcp_exports);
+
+// src/core/errors.ts
+var SiYuanError = class extends Error {
+  code;
+  hint;
+  detail;
+  constructor(code, message, options) {
+    super(message, options?.cause === void 0 ? void 0 : { cause: options.cause });
+    this.name = "SiYuanError";
+    this.code = code;
+    this.hint = options?.hint;
+    this.detail = options?.detail;
+  }
+};
+function describeError(err) {
+  if (err instanceof SiYuanError) {
+    return { code: err.code, message: err.message, hint: err.hint };
+  }
+  return {
+    code: "SIYUAN_API_ERROR",
+    message: err instanceof Error ? err.message : String(err)
+  };
+}
+
+// src/core/client.ts
+var hintFor = (config) => `\u786E\u8BA4\u601D\u6E90\u5DF2\u542F\u52A8\u4E14 API \u7AEF\u53E3\u53EF\u8BBF\u95EE\uFF08\u5F53\u524D http://${config.host}:${config.port}\uFF09\uFF0C\u5E76\u68C0\u67E5 SIYUAN_TOKEN \u662F\u5426\u6B63\u786E`;
+var httpCode = (status) => (
+  // SAFETY: 模板字面量类型无法由 TS 从 number 推导；该分支已排除 200/401/403，故必然是 SIYUAN_HTTP_<status>。
+  `SIYUAN_HTTP_${status}`
+);
+var SiYuanClient = class _SiYuanClient {
+  config;
+  fetchImpl;
+  constructor(config, deps) {
+    this.config = config;
+    this.fetchImpl = deps?.fetch ?? globalThis.fetch;
+  }
+  baseUrl() {
+    return `http://${this.config.host}:${this.config.port}`;
+  }
+  headers() {
+    const headers = { "Content-Type": "application/json" };
+    if (this.config.token) headers.Authorization = `Token ${this.config.token}`;
+    return headers;
+  }
+  async send(endpoint, body) {
+    try {
+      return await this.fetchImpl(`${this.baseUrl()}${endpoint}`, {
+        method: "POST",
+        headers: this.headers(),
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(this.config.timeoutMs)
+      });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : "";
+      if (name === "AbortError" || name === "TimeoutError") {
+        throw new SiYuanError("SIYUAN_TIMEOUT", `\u8BF7\u6C42 ${endpoint} \u8D85\u65F6\uFF08${this.config.timeoutMs}ms\uFF09`, {
+          hint: hintFor(this.config),
+          cause: err
+        });
+      }
+      throw new SiYuanError("SIYUAN_UNREACHABLE", `\u65E0\u6CD5\u8FDE\u63A5\u601D\u6E90\u5185\u6838\uFF08${this.baseUrl()}\uFF09`, {
+        hint: hintFor(this.config),
+        cause: err
+      });
+    }
+  }
+  /**
+   * 发起请求并返回完整信封（含 data 同级的额外字段）。
+   * 保留信封是为了 /api/query/sql 的 limit / truncated —— 它们与 data 平级（ADR-0002/0004 的截断保真）。
+   */
+  async request(endpoint, body) {
+    const res = await this.send(endpoint, body);
+    if (res.status === 401 || res.status === 403) {
+      throw new SiYuanError("SIYUAN_AUTH", `\u9274\u6743\u5931\u8D25\uFF08HTTP ${res.status}\uFF09`, { hint: hintFor(this.config) });
+    }
+    if (res.status !== 200) {
+      throw new SiYuanError(httpCode(res.status), `\u63A5\u53E3 ${endpoint} \u8FD4\u56DE HTTP ${res.status}`, {
+        hint: hintFor(this.config)
+      });
+    }
+    const raw = await res.text();
+    let payload;
+    try {
+      payload = JSON.parse(raw);
+    } catch (err) {
+      throw new SiYuanError("SIYUAN_API_ERROR", `\u63A5\u53E3 ${endpoint} \u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94`, {
+        detail: raw.slice(0, 200),
+        cause: err
+      });
+    }
+    if ((payload.code ?? 0) !== 0) {
+      throw new SiYuanError("SIYUAN_API_ERROR", `\u5185\u6838\u8FD4\u56DE\u9519\u8BEF\uFF1A${payload.msg ?? "unknown error"}`, {
+        detail: payload,
+        hint: hintFor(this.config)
+      });
+    }
+    return payload;
+  }
+  /** 调用内核接口并返回 data 字段。 */
+  async call(endpoint, body = {}) {
+    const payload = await this.request(endpoint, body);
+    return payload.data;
+  }
+  async ping() {
+    try {
+      await this.version();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  version() {
+    return this.call("/api/system/version");
+  }
+  currentTime() {
+    return this.call("/api/system/currentTime");
+  }
+  listNotebooks() {
+    return this.call("/api/notebook/lsNotebooks").then((d) => d?.notebooks ?? []);
+  }
+  getNotebookInfo(notebook) {
+    return this.call("/api/notebook/getNotebookInfo", { notebook }).then(
+      (d) => d?.boxInfo ?? {}
+    );
+  }
+  // ── filetree / export / search（Task 4）────────────────────────────
+  listDocsByPath(notebook, path) {
+    return this.call("/api/filetree/listDocsByPath", {
+      notebook,
+      path,
+      maxListCount: 0
+    }).then((d) => d?.files ?? []);
+  }
+  /**
+   * 列出某个**文档**的子树。
+   * 真实契约：`path` 必须是文档路径（如 `/20261009104613-x.sy`）或文档 ID；
+   * 传根路径（`""` 或 `"/"`）会被内核以 `path escapes notebook directory` 拒绝。
+   * 真实响应：data = { tree: [...] }。
+   */
+  listDocTree(notebook, path, maxDepth, sort) {
+    return this.call("/api/filetree/listDocTree", {
+      notebook,
+      path,
+      maxDepth,
+      sort
+    }).then((d) => d?.tree ?? []);
+  }
+  getPathByID(id) {
+    return this.call("/api/filetree/getPathByID", { id });
+  }
+  getHPathByID(id) {
+    return this.call("/api/filetree/getHPathByID", { id });
+  }
+  getIDsByHPath(notebook, path) {
+    return this.call("/api/filetree/getIDsByHPath", { notebook, path }).then((d) => d ?? []);
+  }
+  exportMdContent(id) {
+    return this.call("/api/export/exportMdContent", { id });
+  }
+  searchDocs(k) {
+    return this.call("/api/filetree/searchDocs", { k }).then((d) => d ?? []);
+  }
+  // ── block / attr / tag / sql（Task 5）──────────────────────────
+  getBlockKramdown(id) {
+    return this.call("/api/block/getBlockKramdown", { id });
+  }
+  getChildBlocks(id) {
+    return this.call("/api/block/getChildBlocks", { id }).then((d) => d ?? []);
+  }
+  getBlockAttrs(id) {
+    return this.call("/api/attr/getBlockAttrs", { id }).then((d) => d ?? {});
+  }
+  fullTextSearchBlock(query) {
+    return this.call("/api/search/fullTextSearchBlock", {
+      query
+    });
+  }
+  searchTag(k) {
+    return this.call("/api/search/searchTag", { k }).then((d) => d?.tags ?? []);
+  }
+  getTag() {
+    return this.call("/api/tag/getTag", { ignoreMaxListHint: true }).then((d) => d ?? []);
+  }
+  /** 保留内核返回的 limit / truncated（ADR-0002/0004 的截断保真）。 */
+  async querySql(stmt) {
+    const payload = await this.request("/api/query/sql", {
+      stmt
+    });
+    return {
+      rows: Array.isArray(payload.data) ? payload.data : [],
+      limit: typeof payload.limit === "number" ? payload.limit : 0,
+      truncated: payload.truncated === true
+    };
+  }
+  // ── 写方法（Task 5B，ADR-0004）───────────────────────────────
+  static parseBlockOps(data) {
+    const first = Array.isArray(data) ? data[0] : void 0;
+    return { doOperations: first?.doOperations ?? [], undoOperations: first?.undoOperations ?? null };
+  }
+  async createNotebook(name) {
+    const data = await this.call(
+      "/api/notebook/createNotebook",
+      { name }
+    );
+    const created = data.notebook ?? { id: String(data.id ?? ""), name: String(data.name ?? name) };
+    return { id: created.id, name: created.name };
+  }
+  createDocWithMd(notebook, path, markdown) {
+    return this.call("/api/filetree/createDocWithMd", { notebook, path, markdown });
+  }
+  async appendBlock(parentID, data, dataType) {
+    return _SiYuanClient.parseBlockOps(await this.call("/api/block/appendBlock", { parentID, data, dataType }));
+  }
+  async prependBlock(parentID, data, dataType) {
+    return _SiYuanClient.parseBlockOps(await this.call("/api/block/prependBlock", { parentID, data, dataType }));
+  }
+  async insertBlock(args) {
+    const body = { data: args.data, dataType: args.dataType };
+    if (args.parentID) body.parentID = args.parentID;
+    if (args.previousID) body.previousID = args.previousID;
+    if (args.nextID) body.nextID = args.nextID;
+    return _SiYuanClient.parseBlockOps(await this.call("/api/block/insertBlock", body));
+  }
+  async updateBlock(id, data, dataType, lockType) {
+    return _SiYuanClient.parseBlockOps(await this.call("/api/block/updateBlock", { id, data, dataType, lockType }));
+  }
+  async deleteBlock(id) {
+    return _SiYuanClient.parseBlockOps(await this.call("/api/block/deleteBlock", { id }));
+  }
+  async moveBlock(id, anchor) {
+    const body = { id };
+    if (anchor.parentID) body.parentID = anchor.parentID;
+    if (anchor.previousID) body.previousID = anchor.previousID;
+    return _SiYuanClient.parseBlockOps(await this.call("/api/block/moveBlock", body));
+  }
+  setBlockAttrs(id, attrs) {
+    return this.call("/api/attr/setBlockAttrs", { id, attrs });
+  }
+  renameDocByID(id, title) {
+    return this.call("/api/filetree/renameDocByID", { id, title });
+  }
+  moveDocsByID(fromIDs, toID) {
+    return this.call("/api/filetree/moveDocsByID", { fromIDs, toID });
+  }
+  removeDocByID(id) {
+    return this.call("/api/filetree/removeDocByID", { id });
+  }
+  /** 供乐观并发校验（W9）：用只读 SQL 取当前块哈希。 */
+  async getBlockHash(id) {
+    const escaped = id.replace(/'/g, "''");
+    const { rows } = await this.querySql(`SELECT hash FROM blocks WHERE id = '${escaped}'`);
+    const hash = rows[0]?.hash;
+    return hash === void 0 || hash === null ? void 0 : String(hash);
+  }
+};
+
+// src/core/config.ts
+var import_node_fs = require("node:fs");
+var import_node_os = require("node:os");
+var DEFAULT_CONFIG = { host: "127.0.0.1", port: 6806, token: "", timeoutMs: 3e4 };
+function configFilePath(homeDir) {
+  return `${homeDir}/.siyuan-agent/config.json`;
+}
+function parsePort(raw) {
+  const n = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
+  return Number.isInteger(n) && n > 0 && n <= 65535 ? n : void 0;
+}
+function parseTimeout(raw) {
+  const n = typeof raw === "number" ? raw : Number.parseInt(String(raw ?? ""), 10);
+  return Number.isInteger(n) && n > 0 ? n : void 0;
+}
+function resolveSiYuanConfig(overrides, deps) {
+  const env = deps?.env ?? process.env;
+  const home = deps?.homeDir ?? (0, import_node_os.homedir)();
+  const readFile = deps?.readFileSync ?? ((p) => (0, import_node_fs.readFileSync)(p, "utf-8"));
+  let file = {};
+  try {
+    const raw = readFile(overrides?.configPath ?? configFilePath(home));
+    const parsed = JSON.parse(raw.replace(/^\uFEFF/, ""));
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      file = parsed;
+    }
+  } catch {
+    file = {};
+  }
+  const pickString = (...values) => values.find((v) => typeof v === "string" && v.length > 0);
+  const pickToken = (...values) => values.find((v) => typeof v === "string");
+  const host = pickString(overrides?.host, env.SIYUAN_HOST, file.host) ?? DEFAULT_CONFIG.host;
+  const port = parsePort(overrides?.port) ?? parsePort(env.SIYUAN_PORT) ?? parsePort(file.port) ?? DEFAULT_CONFIG.port;
+  const timeoutMs = parseTimeout(overrides?.timeoutMs) ?? parseTimeout(env.SIYUAN_TIMEOUT_MS) ?? parseTimeout(file.timeoutMs) ?? DEFAULT_CONFIG.timeoutMs;
+  return {
+    host,
+    port,
+    token: pickToken(overrides?.token, env.SIYUAN_TOKEN, file.token) ?? DEFAULT_CONFIG.token,
+    timeoutMs
+  };
+}
+
+// src/tools/naming.ts
+function fromVcpCommand(command) {
+  if (command.includes("_")) return command;
+  return command.replace(/([a-z0-9])([A-Z])/g, "$1_$2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1_$2").toLowerCase();
+}
+
+// src/tools/dispatch.ts
+function coerceArgs(spec, args) {
+  const out = {};
+  for (const [name, param] of Object.entries(spec.params)) {
+    const raw = args[name];
+    if (raw === void 0 || raw === null || raw === "") {
+      if (param.required) {
+        throw new SiYuanError("SIYUAN_API_ERROR", `\u7F3A\u5C11\u5FC5\u586B\u53C2\u6570 ${name}\uFF08${param.description}\uFF09`, {
+          hint: `\u8C03\u7528 ${spec.name} \u65F6\u5FC5\u987B\u63D0\u4F9B ${name}`
+        });
+      }
+      if (param.default !== void 0) out[name] = param.default;
+      continue;
+    }
+    if (param.type === "number") {
+      const text = typeof raw === "number" ? String(raw) : String(raw).trim();
+      const n = text === "" ? Number.NaN : Number(text);
+      if (!Number.isFinite(n)) {
+        throw new SiYuanError("SIYUAN_API_ERROR", `\u53C2\u6570 ${name} \u9700\u8981\u6570\u5B57\uFF0C\u6536\u5230 ${String(raw)}`, {
+          hint: `\u4E3A ${name} \u63D0\u4F9B\u6570\u5B57\uFF08\u4F8B\u5982 ${name}=10\uFF09`
+        });
+      }
+      out[name] = n;
+    } else if (param.type === "boolean") {
+      if (typeof raw === "boolean") {
+        out[name] = raw;
+      } else if (String(raw).toLowerCase() === "true") {
+        out[name] = true;
+      } else if (String(raw).toLowerCase() === "false") {
+        out[name] = false;
+      } else {
+        throw new SiYuanError("SIYUAN_API_ERROR", `\u53C2\u6570 ${name} \u9700\u8981 true/false\uFF0C\u6536\u5230 ${String(raw)}`, {
+          hint: `\u4E3A ${name} \u63D0\u4F9B\u5E03\u5C14\u503C`
+        });
+      }
+    } else {
+      out[name] = String(raw);
+    }
+  }
+  return out;
+}
+async function dispatchTool(spec, args, client) {
+  try {
+    const coerced = coerceArgs(spec, args);
+    return { ok: true, result: await spec.invoke(client, coerced) };
+  } catch (err) {
+    return { ok: false, error: describeError(err) };
+  }
+}
+async function dispatchCommand(command, args, client, specs) {
+  const trimmed = command.trim();
+  const canonical = fromVcpCommand(trimmed);
+  const spec = specs.find((s) => s.name === canonical || s.name === trimmed);
+  if (!spec) {
+    return {
+      ok: false,
+      error: {
+        code: "SIYUAN_API_ERROR",
+        message: `\u672A\u77E5\u547D\u4EE4 ${command}`,
+        hint: `\u53EF\u7528\u547D\u4EE4\uFF1A${specs.map((s) => s.name).join(", ")}`
+      }
+    };
+  }
+  return dispatchTool(spec, args, client);
+}
+
+// src/core/render.ts
+var TEXT_PREVIEW_LIMIT = 50;
+var DEFAULT_MAX_CHARS = 2e4;
+function renderItem(item) {
+  if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+    return Object.entries(item).filter(([, v]) => v !== void 0 && v !== null && v !== "").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : String(v)}`).join(" | ");
+  }
+  return String(item);
+}
+function renderText(value, options) {
+  if (value === null || value === void 0) return "\u65E0\u6570\u636E";
+  const previewLimit = options?.previewLimit ?? TEXT_PREVIEW_LIMIT;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "\u5171 0 \u6761";
+    const shown = value.slice(0, previewLimit);
+    const lines = shown.map((item, i) => `${i + 1}. ${renderItem(item)}`);
+    if (value.length > previewLimit) {
+      lines.push(`\u2026 \u5171 ${value.length} \u6761\uFF0C\u5DF2\u663E\u793A\u524D ${previewLimit} \u6761\uFF08\u53D6\u5168\u91CF\u8BF7\u7528 --json \u6216\u8BFB\u53D6 data \u5B57\u6BB5\uFF09`);
+    } else {
+      lines.unshift(`\u5171 ${value.length} \u6761`);
+    }
+    return lines.join("\n");
+  }
+  if (typeof value === "object") return renderItem(value);
+  return String(value);
+}
+function truncateText(text, maxChars = DEFAULT_MAX_CHARS) {
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, maxChars)}
+
+\u26A0\uFE0F \u5DF2\u622A\u65AD\uFF1A\u539F\u6587 ${text.length} \u5B57\u7B26\uFF0C\u4EC5\u663E\u793A\u524D ${maxChars} \u5B57\u7B26`;
+}
+var DEFAULT_SQL_ROW_CAP = 64;
+function renderSqlNotice(limit, truncated) {
+  if (!truncated) return "";
+  const cap = limit > 0 ? limit : DEFAULT_SQL_ROW_CAP;
+  return `\u26A0\uFE0F \u7ED3\u679C\u88AB\u622A\u65AD\uFF1A\u5185\u6838\u9ED8\u8BA4\u4E0A\u9650 ${cap} \u884C\u3002\u8BF7\u52A0\u663E\u5F0F LIMIT/OFFSET \u5206\u9875\uFF0C\u6216\u6539\u7528\u805A\u5408/\u8FC7\u6EE4\u6761\u4EF6\u3002`;
+}
+
+// src/tools/guard.ts
+var SQL_FORBIDDEN_KEYWORDS = [
+  "PRAGMA",
+  "ATTACH",
+  "DETACH",
+  "INSERT",
+  "UPDATE",
+  "DELETE",
+  "DROP",
+  "ALTER",
+  "CREATE",
+  "REPLACE",
+  "VACUUM",
+  "REINDEX",
+  "ANALYZE",
+  "TRUNCATE"
+];
+function stripComments(sql) {
+  return sql.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+}
+function stripStringLiterals(sql) {
+  let out = "";
+  let i = 0;
+  while (i < sql.length) {
+    const ch = sql[i];
+    if (ch !== "'") {
+      out += ch;
+      i += 1;
+      continue;
+    }
+    i += 1;
+    let closed = false;
+    while (i < sql.length) {
+      if (sql[i] === "'") {
+        if (sql[i + 1] === "'") {
+          i += 2;
+          continue;
+        }
+        closed = true;
+        i += 1;
+        break;
+      }
+      i += 1;
+    }
+    if (!closed) return null;
+    out += " '' ";
+  }
+  return out;
+}
+function assertReadOnlySql(stmt) {
+  function refuse(reason) {
+    throw new SiYuanError(
+      "SIYUAN_READONLY_BLOCKED",
+      `SQL \u88AB\u62D2\u7EDD\uFF1A${reason}\u3002\u672C\u5DE5\u5177\u4E00\u671F\u53EA\u8BFB\uFF0C\u4EC5\u5141\u8BB8\u5355\u6761 SELECT / WITH \u67E5\u8BE2\u3002`,
+      { hint: "\u6539\u7528 SELECT \u67E5\u8BE2\uFF1B\u5199\u64CD\u4F5C\u8BF7\u4F7F\u7528 typed \u5199\u5DE5\u5177\uFF08\u5E26 confirm \u786E\u8BA4\uFF09\u3002" }
+    );
+  }
+  const withoutComments = stripComments(stmt).trim();
+  if (withoutComments.length === 0) refuse("\u8BED\u53E5\u4E3A\u7A7A");
+  const withoutLiterals = stripStringLiterals(withoutComments);
+  if (withoutLiterals === null) refuse("\u5355\u5F15\u53F7\u4E0D\u95ED\u5408");
+  const firstWord = /^([A-Za-z]+)/.exec(withoutLiterals)?.[1]?.toUpperCase();
+  if (firstWord !== "SELECT" && firstWord !== "WITH") {
+    refuse(`\u4E0D\u652F\u6301\u7684\u8BED\u53E5\u7C7B\u578B ${firstWord ?? "(\u672A\u77E5)"}`);
+  }
+  const semicolon = withoutLiterals.indexOf(";");
+  if (semicolon !== -1) {
+    const trailing = withoutLiterals.slice(semicolon + 1).trim();
+    if (trailing.length > 0) refuse("\u68C0\u6D4B\u5230\u591A\u8BED\u53E5");
+  }
+  for (const keyword of SQL_FORBIDDEN_KEYWORDS) {
+    if (new RegExp(`\\b${keyword}\\b`, "i").test(withoutLiterals)) {
+      refuse(`\u5305\u542B\u53D8\u66F4\u5173\u952E\u5B57 ${keyword}`);
+    }
+  }
+}
+
+// src/tools/write-guard.ts
+var PREVIEW_CHARS = 200;
+function isDestructive(spec) {
+  return spec.risk === "destructive";
+}
+function previewBlock(kramdown, childCount) {
+  const head = kramdown.length > PREVIEW_CHARS ? `${kramdown.slice(0, PREVIEW_CHARS)}
+\u2026\uFF08\u5DF2\u622A\u65AD\uFF0C\u539F\u6587 ${kramdown.length} \u5B57\u7B26\uFF09` : kramdown;
+  return `\u5B50\u5757\u6570\uFF1A${childCount}
+\u5F53\u524D\u5185\u5BB9\uFF1A
+${head || "\uFF08\u7A7A\u5757\uFF09"}`;
+}
+function previewDoc(hPath, childCount) {
+  if (!hPath) return "\u76EE\u6807\u6587\u6863\u4E0D\u5B58\u5728\uFF08\u53EF\u80FD\u5DF2\u88AB\u5220\u9664\u6216 ID \u6709\u8BEF\uFF09";
+  return `\u6587\u6863\u8DEF\u5F84\uFF1A${hPath}
+\u5B50\u5757\u6570\uFF1A${childCount}`;
+}
+async function buildBlockPreview(client, id) {
+  try {
+    const { kramdown } = await client.getBlockKramdown(id);
+    const children = await client.getChildBlocks(id).catch(() => []);
+    return { preview: previewBlock(kramdown ?? "", children.length), exists: true };
+  } catch {
+    return { preview: "\u76EE\u6807\u5757\u4E0D\u5B58\u5728\uFF08\u53EF\u80FD\u5DF2\u88AB\u5220\u9664\u6216 ID \u6709\u8BEF\uFF09", exists: false };
+  }
+}
+async function buildDocPreview(client, id) {
+  try {
+    const hPath = await client.getHPathByID(id);
+    const children = await client.getChildBlocks(id).catch(() => []);
+    return { preview: previewDoc(hPath, children.length), exists: Boolean(hPath) };
+  } catch {
+    return { preview: previewDoc(void 0, 0), exists: false };
+  }
+}
+function requireConfirm(spec, args, preview, exists) {
+  if (!isDestructive(spec)) return;
+  if (!exists) {
+    throw new SiYuanError("SIYUAN_NOT_FOUND", `\u76EE\u6807\u4E0D\u5B58\u5728\uFF0C\u5DF2\u62D2\u7EDD\u6267\u884C\uFF08${spec.name}\uFF09`, { hint: preview });
+  }
+  if (args.confirm !== true) {
+    throw new SiYuanError(
+      "SIYUAN_CONFIRM_REQUIRED",
+      `\u7834\u574F\u578B\u64CD\u4F5C\u672A\u786E\u8BA4\uFF0C\u5DF2\u62D2\u7EDD\u6267\u884C\uFF08${spec.name}\uFF09\u3002
+--- \u9884\u89C8 ---
+${preview}`,
+      { hint: "\u786E\u8BA4\u65E0\u8BEF\u540E\u8BF7\u5E26 confirm: true \u91CD\u65B0\u8C03\u7528\uFF1B\u53EA\u67E5\u770B\u5F71\u54CD\u53EF\u7528 dryRun: true\u3002" }
+    );
+  }
+}
+function shouldDryRun(args) {
+  return args.dryRun === true;
+}
+async function requireFreshHash(client, id, expectedHash) {
+  if (!expectedHash) return;
+  const current = await client.getBlockHash(id);
+  if (current === void 0) {
+    throw new SiYuanError("SIYUAN_STALE_TARGET", `\u76EE\u6807\u5757\u5DF2\u4E0D\u5B58\u5728\uFF08id=${id}\uFF09\uFF0C\u5DF2\u62D2\u7EDD\u6267\u884C`, {
+      hint: "\u8BF7\u91CD\u65B0\u5B9A\u4F4D\u76EE\u6807\u540E\u518D\u8BD5\u3002"
+    });
+  }
+  if (current !== expectedHash) {
+    throw new SiYuanError(
+      "SIYUAN_STALE_TARGET",
+      `\u76EE\u6807\u5757\u5DF2\u88AB\u4FEE\u6539\uFF08\u5F53\u524D hash=${current}\uFF0C\u671F\u671B ${expectedHash}\uFF09\uFF0C\u5DF2\u62D2\u7EDD\u6267\u884C`,
+      { hint: "\u8BF7\u5148\u91CD\u65B0\u8BFB\u53D6\u76EE\u6807\u5185\u5BB9\uFF0C\u786E\u8BA4\u540E\u518D\u6267\u884C\u3002" }
+    );
+  }
+}
+
+// src/tools/definitions.ts
+function compactDocEntry(entry2) {
+  const item = entry2 ?? {};
+  return { id: item.id, name: item.name, path: item.path, subFileCount: item.subFileCount };
+}
+var ID_DESC = "\u5757\u6216\u6587\u6863 ID\uFF0C\u5F62\u5982 20210817205410-2kvfpfn";
+var NB_DESC = "\u7B14\u8BB0\u672C ID\uFF08\u7531 notebook_list \u83B7\u53D6\uFF09";
+var readOnlyTools = [
+  {
+    name: "version",
+    title: "\u5185\u6838\u7248\u672C",
+    description: "\u83B7\u53D6\u601D\u6E90\u5185\u6838\u7248\u672C\u53F7\uFF0C\u7528\u4E8E\u786E\u8BA4\u8FDE\u63A5\u53EF\u7528\u6027\u4E0E\u5185\u6838\u5927\u7248\u672C\u3002",
+    risk: "read",
+    params: {},
+    invoke: async (client) => {
+      const version = await client.version();
+      return { text: `\u601D\u6E90\u5185\u6838\u7248\u672C\uFF1A${version}`, data: { version } };
+    }
+  },
+  {
+    name: "status",
+    title: "\u8FDE\u63A5\u72B6\u6001",
+    description: "\u6C47\u603B\u8FDE\u63A5\u72B6\u6001\u3001\u5185\u6838\u7248\u672C\u3001\u5185\u6838\u65F6\u95F4\u4E0E\u5F53\u524D\u8FDE\u63A5\u914D\u7F6E\uFF08host/port\u3001\u662F\u5426\u5E26 Token\uFF09\uFF0C\u7528\u4E8E\u6392\u67E5\u8FDE\u4E0D\u4E0A\u6216\u9274\u6743\u95EE\u9898\u3002",
+    risk: "read",
+    params: {},
+    invoke: async (client) => {
+      const connected = await client.ping();
+      const version = connected ? await client.version() : "";
+      const time = connected ? await client.currentTime() : 0;
+      const { host, port, token } = client.config;
+      const text = [
+        `\u8FDE\u63A5\uFF1A${connected ? "\u6B63\u5E38" : "\u4E0D\u53EF\u8FBE"}`,
+        `\u5730\u5740\uFF1Ahttp://${host}:${port}`,
+        `Token\uFF1A${token ? "\u5DF2\u914D\u7F6E" : "\u672A\u914D\u7F6E"}`,
+        connected ? `\u5185\u6838\u7248\u672C\uFF1A${version}` : "",
+        connected ? `\u5185\u6838\u65F6\u95F4\uFF1A${new Date(time).toISOString()}` : ""
+      ].filter(Boolean).join("\n");
+      return { text, data: { connected, host, port, hasToken: Boolean(token), version, time } };
+    }
+  },
+  {
+    name: "notebook_list",
+    title: "\u5217\u51FA\u7B14\u8BB0\u672C",
+    description: "\u5217\u51FA\u6240\u6709\u7B14\u8BB0\u672C\u53CA\u5176 id\u3001\u540D\u79F0\u4E0E\u662F\u5426\u5DF2\u5173\u95ED\uFF08closed\uFF09\u3002\u4EFB\u4F55\u6309\u7B14\u8BB0\u672C\u64CD\u4F5C\u7684\u8D77\u70B9\u3002",
+    risk: "read",
+    params: {},
+    invoke: async (client) => {
+      const notebooks = await client.listNotebooks();
+      return { text: renderText(notebooks), data: notebooks };
+    }
+  },
+  {
+    name: "notebook_info",
+    title: "\u7B14\u8BB0\u672C\u4FE1\u606F",
+    description: "\u83B7\u53D6\u6307\u5B9A\u7B14\u8BB0\u672C\u7684\u914D\u7F6E\u4E0E\u7EDF\u8BA1\u4FE1\u606F\u3002",
+    risk: "read",
+    params: { notebook: { type: "string", required: true, description: NB_DESC } },
+    invoke: async (client, args) => {
+      const info = await client.getNotebookInfo(String(args.notebook));
+      return { text: renderText(info), data: info };
+    }
+  },
+  {
+    name: "doc_list",
+    title: "\u5217\u51FA\u6587\u6863",
+    description: "\u5217\u51FA\u6307\u5B9A\u7B14\u8BB0\u672C\u8DEF\u5F84\u4E0B\u7684\u76F4\u63A5\u5B50\u6587\u6863\u4E0E\u5B50\u76EE\u5F55\uFF08\u4E0D\u9012\u5F52\uFF09\u3002",
+    risk: "read",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", description: "\u7B14\u8BB0\u672C\u5185\u8DEF\u5F84\uFF0C\u9ED8\u8BA4\u6839\u8DEF\u5F84", default: "/" }
+    },
+    invoke: async (client, args) => {
+      const docs = await client.listDocsByPath(String(args.notebook), String(args.path));
+      return { text: renderText(docs.map(compactDocEntry)), data: docs };
+    }
+  },
+  {
+    name: "doc_tree",
+    title: "\u6587\u6863\u5B50\u6811",
+    description: "\u4EE5\u6307\u5B9A\u6587\u6863\u4E3A\u6839\u9012\u5F52\u5217\u51FA\u5176\u5B50\u6587\u6863\u6811\u3002\u5185\u6838\u4E0D\u63A5\u53D7\u6839\u8DEF\u5F84\uFF1Apath \u5FC5\u987B\u662F\u6587\u6863\u8DEF\u5F84\uFF08\u5982 /20261009104613-x.sy\uFF09\u6216\u6587\u6863 ID\uFF1B\u8981\u679A\u4E3E\u6574\u4E2A\u7B14\u8BB0\u672C\u7684\u6587\u6863\u8BF7\u7528 doc_list\uFF08\u9010\u5C42\uFF09\u6216 sql\u3002\u6CE8\u610F\uFF1A\u8FD4\u56DE\u7684\u662F\u5B50\u6587\u6863 **ID \u5217\u8868**\uFF0C\u9700\u8981\u8DEF\u5F84\u65F6\u518D\u7528 doc_hpath_by_id \u89E3\u6790\u3002depth \u63A7\u5236\u6700\u5927\u6DF1\u5EA6\uFF08-1 \u8868\u793A\u4E0D\u9650\uFF09\u3002",
+    risk: "read",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: {
+        type: "string",
+        required: true,
+        description: "\u6587\u6863\u8DEF\u5F84\uFF08\u5982 /20261009104613-x.sy\uFF09\u6216\u6587\u6863 ID\uFF1B\u4E0D\u80FD\u662F\u6839\u8DEF\u5F84"
+      },
+      depth: { type: "number", description: "\u6700\u5927\u6DF1\u5EA6\uFF0C-1 \u4E3A\u4E0D\u9650", default: -1 },
+      sort: { type: "number", description: "\u6392\u5E8F\u6A21\u5F0F\uFF0C0 \u4E3A\u9ED8\u8BA4", default: 0 }
+    },
+    invoke: async (client, args) => {
+      const tree = await client.listDocTree(
+        String(args.notebook),
+        String(args.path),
+        Number(args.depth),
+        Number(args.sort)
+      );
+      return { text: renderText(tree), data: tree };
+    }
+  },
+  {
+    name: "doc_path_by_id",
+    title: "\u6587\u6863\u5B58\u50A8\u8DEF\u5F84",
+    description: "\u7531\u6587\u6863 ID \u83B7\u53D6\u5176\u6240\u5728\u7B14\u8BB0\u672C\u4E0E\u5185\u6838\u5B58\u50A8\u8DEF\u5F84\u3002",
+    risk: "read",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const path = await client.getPathByID(String(args.id));
+      return { text: `notebook: ${path.notebook}
+path: ${path.path}`, data: path };
+    }
+  },
+  {
+    name: "doc_hpath_by_id",
+    title: "\u6587\u6863\u4EBA\u7C7B\u53EF\u8BFB\u8DEF\u5F84",
+    description: "\u7531\u6587\u6863 ID \u83B7\u53D6\u4EBA\u7C7B\u53EF\u8BFB\u8DEF\u5F84\uFF08\u5982 /\u7B14\u8BB0/\u7532\uFF09\u3002",
+    risk: "read",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const hPath = await client.getHPathByID(String(args.id));
+      return { text: hPath, data: { hPath } };
+    }
+  },
+  {
+    name: "doc_ids_by_hpath",
+    title: "\u6309\u8DEF\u5F84\u53D6\u6587\u6863 ID",
+    description: "\u7531\u7B14\u8BB0\u672C\u5185\u7684\u4EBA\u7C7B\u53EF\u8BFB\u8DEF\u5F84\u83B7\u53D6\u5BF9\u5E94\u6587\u6863 ID \u5217\u8868\u3002",
+    risk: "read",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "\u4EBA\u7C7B\u53EF\u8BFB\u8DEF\u5F84\uFF0C\u5982 /\u7B14\u8BB0/\u7532" }
+    },
+    invoke: async (client, args) => {
+      const ids = await client.getIDsByHPath(String(args.notebook), String(args.path));
+      return { text: renderText(ids), data: ids };
+    }
+  },
+  {
+    name: "doc_export_md",
+    title: "\u5BFC\u51FA\u6587\u6863 Markdown",
+    description: "\u628A\u6587\u6863\u5BFC\u51FA\u4E3A Markdown \u6587\u672C\uFF1BmaxChars \u63A7\u5236\u6700\u5927\u8FD4\u56DE\u5B57\u7B26\u6570\uFF0C\u8D85\u51FA\u4F1A\u88AB\u622A\u65AD\u5E76\u63D0\u793A\u3002",
+    risk: "read",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      maxChars: { type: "number", description: "\u6700\u5927\u5B57\u7B26\u6570", default: 2e4 }
+    },
+    invoke: async (client, args) => {
+      const { hPath, content } = await client.exportMdContent(String(args.id));
+      return {
+        text: `${hPath}
+
+${truncateText(content ?? "", Number(args.maxChars))}`,
+        data: { hPath, content }
+      };
+    }
+  },
+  {
+    name: "block_get",
+    title: "\u8BFB\u53D6\u5757 kramdown",
+    description: "\u83B7\u53D6\u5757\u7684 kramdown \u6E90\u6587\u672C\uFF1BmaxChars \u63A7\u5236\u6700\u5927\u8FD4\u56DE\u5B57\u7B26\u6570\uFF0C\u662F\u6539\u5199\u524D\u7684\u300C\u5148\u8BFB\u300D\u6B65\u9AA4\u3002",
+    risk: "read",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      maxChars: { type: "number", description: "\u6700\u5927\u5B57\u7B26\u6570", default: 2e4 }
+    },
+    invoke: async (client, args) => {
+      const res = await client.getBlockKramdown(String(args.id));
+      return { text: truncateText(res.kramdown ?? "", Number(args.maxChars)), data: res };
+    }
+  },
+  {
+    name: "block_children",
+    title: "\u8BFB\u53D6\u5B50\u5757",
+    description: "\u83B7\u53D6\u6307\u5B9A\u5757\u7684\u76F4\u63A5\u5B50\u5757\u5217\u8868\u3002",
+    risk: "read",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const rows = await client.getChildBlocks(String(args.id));
+      return { text: renderText(rows), data: rows };
+    }
+  },
+  {
+    name: "block_attrs_get",
+    title: "\u8BFB\u53D6\u5757\u5C5E\u6027",
+    description: "\u83B7\u53D6\u5757\u7684\u81EA\u5B9A\u4E49\u5C5E\u6027\u952E\u503C\u5BF9\u3002",
+    risk: "read",
+    params: { id: { type: "string", required: true, description: ID_DESC } },
+    invoke: async (client, args) => {
+      const attrs = await client.getBlockAttrs(String(args.id));
+      return { text: renderText(attrs), data: attrs };
+    }
+  },
+  {
+    name: "search_blocks",
+    title: "\u5168\u6587\u68C0\u7D22\u5757",
+    description: "\u5728\u5757\u5185\u5BB9\u4E2D\u505A\u5168\u6587\u68C0\u7D22\uFF0C\u8FD4\u56DE\u547D\u4E2D\u7684\u5757\u53CA\u5339\u914D\u7EDF\u8BA1\u3002",
+    risk: "read",
+    params: { query: { type: "string", required: true, description: "\u68C0\u7D22\u5173\u952E\u8BCD" } },
+    invoke: async (client, args) => {
+      const res = await client.fullTextSearchBlock(String(args.query));
+      const blocks = res.blocks ?? [];
+      return {
+        text: `${renderText(blocks)}
+\u5339\u914D\u5757\u6570\uFF1A${res.matchedBlockCount ?? blocks.length}`,
+        data: res
+      };
+    }
+  },
+  {
+    name: "search_docs",
+    title: "\u68C0\u7D22\u6587\u6863\u540D",
+    description: "\u6309\u5173\u952E\u8BCD\u68C0\u7D22\u6587\u6863\u540D\u79F0\uFF0C\u8FD4\u56DE\u547D\u4E2D\u7684\u6587\u6863\u8DEF\u5F84\u4E0E ID\u3002",
+    risk: "read",
+    params: { k: { type: "string", required: true, description: "\u68C0\u7D22\u5173\u952E\u8BCD" } },
+    invoke: async (client, args) => {
+      const hits = await client.searchDocs(String(args.k));
+      return { text: renderText(hits), data: hits };
+    }
+  },
+  {
+    name: "search_tag",
+    title: "\u68C0\u7D22\u6807\u7B7E",
+    description: "\u6309\u5173\u952E\u8BCD\u68C0\u7D22\u6807\u7B7E\u540D\uFF0Ck \u4E3A\u7A7A\u65F6\u8FD4\u56DE\u5168\u90E8\u6807\u7B7E\u540D\u3002",
+    risk: "read",
+    params: { k: { type: "string", description: "\u6807\u7B7E\u5173\u952E\u8BCD\uFF0C\u53EF\u7559\u7A7A", default: "" } },
+    invoke: async (client, args) => {
+      const tags = await client.searchTag(String(args.k));
+      return { text: renderText(tags), data: tags };
+    }
+  },
+  {
+    name: "tag_list",
+    title: "\u5217\u51FA\u5168\u90E8\u6807\u7B7E",
+    description: "\u5217\u51FA\u77E5\u8BC6\u5E93\u4E2D\u7684\u5168\u90E8\u6807\u7B7E\u53CA\u5F15\u7528\u8BA1\u6570\uFF08\u5FFD\u7565\u5185\u6838\u7684\u5217\u8868\u6761\u6570\u4E0A\u9650\uFF09\u3002",
+    risk: "read",
+    params: {},
+    invoke: async (client) => {
+      const tags = await client.getTag();
+      return { text: renderText(tags), data: tags };
+    }
+  },
+  {
+    name: "sql",
+    title: "SQL \u67E5\u8BE2\uFF08\u53EA\u8BFB\uFF09",
+    description: "\u5BF9\u5185\u6838 SQLite \u7D22\u5F15\u6267\u884C\u53EA\u8BFB SQL \u67E5\u8BE2\uFF0C\u662F\u672A\u8986\u76D6\u573A\u666F\u7684\u9003\u751F\u901A\u9053\u3002\u4EC5\u5141\u8BB8\u5355\u6761 SELECT \u6216 WITH \u8BED\u53E5\uFF1B\u53D8\u66F4\u7C7B\u8BED\u53E5\uFF08INSERT/UPDATE/DELETE/DROP/PRAGMA \u7B49\uFF09\u4F1A\u88AB\u62D2\u7EDD\u3002\u65E0 LIMIT \u65F6\u5185\u6838\u9ED8\u8BA4\u53EA\u8FD4\u56DE 64 \u884C\u5E76\u6807\u8BB0\u622A\u65AD\u3002",
+    risk: "read",
+    params: {
+      stmt: { type: "string", required: true, description: "\u53EA\u8BFB SQL \u8BED\u53E5\uFF08\u5355\u6761 SELECT \u6216 WITH\uFF09" }
+    },
+    invoke: async (client, args) => {
+      const stmt = String(args.stmt);
+      assertReadOnlySql(stmt);
+      const { rows, limit, truncated } = await client.querySql(stmt);
+      const notice = renderSqlNotice(limit, truncated);
+      return {
+        text: [renderText(rows), notice].filter(Boolean).join("\n\n"),
+        data: { rows, limit, truncated }
+      };
+    }
+  }
+];
+var CONFIRM_DESC = "\u786E\u8BA4\u6807\u5FD7\uFF1A\u5FC5\u987B\u663E\u5F0F\u4F20 true \u624D\u6267\u884C\uFF1B\u4E0D\u4F20\u6216\u4F20 false \u65F6\u53EA\u8FD4\u56DE\u9884\u89C8\u5E76\u62D2\u7EDD\uFF08\u9632\u8BEF\u64CD\u4F5C\uFF09";
+var DRYRUN_DESC = "\u53EA\u9884\u89C8\u5F71\u54CD\u3001\u4E0D\u5199\u5185\u6838\uFF1B\u4EC5\u4F20\u5B57\u9762 true \u751F\u6548";
+var HASH_DESC = "\u53EF\u9009\u4E50\u89C2\u5E76\u53D1\u6821\u9A8C\uFF1A\u4F20\u5165\u76EE\u6807\u7684\u5F53\u524D blocks hash\uFF0C\u4E0D\u4E00\u81F4\u5219\u62D2\u7EDD\u8986\u76D6";
+function renderOps(title, ops) {
+  const lines = ops.doOperations.map((op) => `- ${op.action} id=${op.id ?? "-"}`);
+  const undo = ops.undoOperations ? "\n\u5185\u6838\u5DF2\u8FD4\u56DE\u53EF\u64A4\u9500\u64CD\u4F5C\uFF08undoOperations\uFF09" : "";
+  return [title, ...lines, undo].filter(Boolean).join("\n");
+}
+function previewText(spec, action, preview) {
+  return `\u9884\u89C8\uFF08\u672A\u6267\u884C\uFF09\uFF1A${action}\uFF08${spec.name}\uFF09
+${preview}
+
+\u786E\u8BA4\u65E0\u8BEF\u8BF7\u5E26 confirm: true \u91CD\u65B0\u8C03\u7528\u3002`;
+}
+function requireName(spec, args, key) {
+  const value = String(args[key] ?? "").trim();
+  if (value.length === 0) {
+    throw new SiYuanError("SIYUAN_API_ERROR", `${spec.name} \u9700\u8981\u975E\u7A7A\u53C2\u6570 ${key}`, {
+      hint: `\u8BF7\u63D0\u4F9B ${key}`
+    });
+  }
+  return value;
+}
+function requireAnchor(spec, parentID, previousID, nextID) {
+  if (!parentID && !previousID && !nextID) {
+    throw new SiYuanError(
+      "SIYUAN_API_ERROR",
+      `${spec.name} \u81F3\u5C11\u9700\u8981\u4E00\u4E2A\u951A\u70B9\uFF08parentID \u6216 previousID\uFF09`,
+      { hint: "\u7528 block_get/block_children \u627E\u5230\u76EE\u6807\u5757\u540E\uFF0C\u4F20\u5165 parentID\uFF08\u6302\u5230\u5176\u4E0B\uFF09\u6216 previousID\uFF08\u63D2\u5230\u5176\u540E\uFF09\u3002" }
+    );
+  }
+}
+function parseAttrs(raw) {
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw new SiYuanError("SIYUAN_API_ERROR", 'attrs \u9700\u8981 JSON \u5BF9\u8C61\u5B57\u7B26\u4E32\uFF08\u4F8B\u5982 {"custom-a":"1"}\uFF09', {
+        hint: "\u81EA\u5B9A\u4E49\u5C5E\u6027\u952E\u5FC5\u987B\u4EE5 custom- \u5F00\u5934\u3002"
+      });
+    }
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new SiYuanError("SIYUAN_API_ERROR", "attrs \u9700\u8981 JSON \u5BF9\u8C61", { hint: '\u5F62\u5982 {"custom-a":"1"}' });
+  }
+  const entries = Object.entries(parsed);
+  for (const [key] of entries) {
+    if (!key.startsWith("custom-")) {
+      throw new SiYuanError("SIYUAN_API_ERROR", `\u5C5E\u6027\u540D ${key} \u975E\u6CD5\uFF1A\u5185\u6838\u8981\u6C42\u81EA\u5B9A\u4E49\u5C5E\u6027\u4EE5 custom- \u5F00\u5934`, {
+        hint: "\u4F8B\u5982 custom-status\u3001custom-tag\u3002"
+      });
+    }
+  }
+  return Object.fromEntries(entries.map(([key, value]) => [key, String(value)]));
+}
+function parseIdList(raw) {
+  const ids = String(raw ?? "").split(",").map((part) => part.trim()).filter((part) => part.length > 0);
+  if (ids.length === 0) {
+    throw new SiYuanError("SIYUAN_API_ERROR", "\u9700\u8981\u81F3\u5C11\u4E00\u4E2A\u6587\u6863 ID", { hint: "\u591A\u4E2A ID \u7528\u9017\u53F7\u5206\u9694\u3002" });
+  }
+  return ids;
+}
+var additiveTools = [
+  {
+    name: "notebook_create",
+    title: "\u521B\u5EFA\u7B14\u8BB0\u672C",
+    description: "\u521B\u5EFA\u4E00\u4E2A\u65B0\u7B14\u8BB0\u672C\u5E76\u8FD4\u56DE\u5176 ID\u3002\u4E5F\u662F\u505A\u5199\u64CD\u4F5C\u5B9E\u9A8C\uFF08\u6C99\u76D2\uFF09\u7684\u8D77\u70B9\u3002",
+    risk: "additive",
+    params: { name: { type: "string", required: true, description: "\u7B14\u8BB0\u672C\u540D\u79F0" } },
+    invoke: async (client, args) => {
+      const created = await client.createNotebook(requireName(findToolSpecOrThrow("notebook_create"), args, "name"));
+      return { text: `\u5DF2\u521B\u5EFA\u7B14\u8BB0\u672C\uFF1A${created.name}\uFF08id=${created.id}\uFF09`, data: created };
+    }
+  },
+  {
+    name: "doc_create",
+    title: "\u521B\u5EFA\u6587\u6863",
+    description: "\u5728\u6307\u5B9A\u7B14\u8BB0\u672C\u4E2D\u6309\u4EBA\u8BFB\u8DEF\u5F84\u521B\u5EFA\u6587\u6863\u5E76\u5199\u5165 Markdown\u3002\u540C path \u91CD\u590D\u8C03\u7528\u4E0D\u4F1A\u8986\u76D6\u5DF2\u6709\u6587\u6863\uFF08\u5E42\u7B49\uFF09\u3002",
+    risk: "additive",
+    params: {
+      notebook: { type: "string", required: true, description: NB_DESC },
+      path: { type: "string", required: true, description: "\u4EBA\u8BFB\u8DEF\u5F84\uFF0C\u9700\u4EE5 / \u5F00\u5934\uFF0C\u5982 /\u6C99\u76D2/\u7532" },
+      markdown: { type: "string", description: "GFM Markdown \u5185\u5BB9", default: "" }
+    },
+    invoke: async (client, args) => {
+      const id = await client.createDocWithMd(
+        String(args.notebook),
+        String(args.path),
+        String(args.markdown ?? "")
+      );
+      return { text: `\u5DF2\u521B\u5EFA\u6587\u6863\uFF1A${id}
+\u8DEF\u5F84\uFF1A${String(args.path)}`, data: { id, notebook: args.notebook, path: args.path } };
+    }
+  },
+  {
+    name: "block_append",
+    title: "\u8FFD\u52A0\u5757",
+    description: "\u628A\u5185\u5BB9\u8FFD\u52A0\u5230\u6307\u5B9A\u5757\uFF08\u901A\u5E38\u662F\u6587\u6863 ID\uFF09\u7684\u5B50\u5757\u672B\u5C3E\u3002\u5199\u5165\u65B0\u5185\u5BB9\u7684\u9996\u9009\u65B9\u5F0F\u3002",
+    risk: "additive",
+    params: {
+      parentID: { type: "string", required: true, description: "\u7236\u5757 ID\uFF08\u6587\u6863 ID \u4E5F\u53EF\uFF09" },
+      data: { type: "string", required: true, description: "\u8981\u5199\u5165\u7684\u5185\u5BB9" },
+      dataType: { type: "string", description: "\u6570\u636E\u7C7B\u578B\uFF1Amarkdown", default: "markdown" }
+    },
+    invoke: async (client, args) => {
+      const ops = await client.appendBlock(String(args.parentID), String(args.data), String(args.dataType));
+      return { text: renderOps(`\u5DF2\u8FFD\u52A0\u5230 ${String(args.parentID)}`, ops), data: ops };
+    }
+  },
+  {
+    name: "block_prepend",
+    title: "\u524D\u7F6E\u5757",
+    description: "\u628A\u5185\u5BB9\u63D2\u5165\u5230\u6307\u5B9A\u5757\u7684\u5B50\u5757\u5F00\u5934\u3002",
+    risk: "additive",
+    params: {
+      parentID: { type: "string", required: true, description: "\u7236\u5757 ID\uFF08\u6587\u6863 ID \u4E5F\u53EF\uFF09" },
+      data: { type: "string", required: true, description: "\u8981\u5199\u5165\u7684\u5185\u5BB9" },
+      dataType: { type: "string", description: "\u6570\u636E\u7C7B\u578B\uFF1Amarkdown", default: "markdown" }
+    },
+    invoke: async (client, args) => {
+      const ops = await client.prependBlock(String(args.parentID), String(args.data), String(args.dataType));
+      return { text: renderOps(`\u5DF2\u524D\u7F6E\u5230 ${String(args.parentID)}`, ops), data: ops };
+    }
+  },
+  {
+    name: "block_insert",
+    title: "\u63D2\u5165\u5757",
+    description: "\u6309\u951A\u70B9\u63D2\u5165\u65B0\u5757\u3002nextID / previousID / parentID \u81F3\u5C11\u4E00\u4E2A\u6709\u6548\uFF0C\u5185\u6838\u4F18\u5148\u7EA7 nextID > previousID > parentID\u3002",
+    risk: "additive",
+    params: {
+      data: { type: "string", required: true, description: "\u8981\u5199\u5165\u7684\u5185\u5BB9" },
+      dataType: { type: "string", description: "\u6570\u636E\u7C7B\u578B\uFF1Amarkdown", default: "markdown" },
+      parentID: { type: "string", description: "\u7236\u5757 ID\uFF08\u6302\u5230\u5176\u4E0B\uFF09" },
+      previousID: { type: "string", description: "\u524D\u4E00\u4E2A\u5757 ID\uFF08\u63D2\u5230\u5176\u540E\uFF09" },
+      nextID: { type: "string", description: "\u540E\u4E00\u4E2A\u5757 ID\uFF08\u63D2\u5230\u5176\u524D\uFF09" }
+    },
+    invoke: async (client, args) => {
+      const parentID = optionalString(args.parentID);
+      const previousID = optionalString(args.previousID);
+      const nextID = optionalString(args.nextID);
+      requireAnchor(findToolSpecOrThrow("block_insert"), parentID, previousID, nextID);
+      const ops = await client.insertBlock({
+        data: String(args.data),
+        dataType: String(args.dataType),
+        parentID,
+        previousID,
+        nextID
+      });
+      return { text: renderOps("\u5DF2\u63D2\u5165\u5757", ops), data: ops };
+    }
+  },
+  {
+    name: "block_attrs_set",
+    title: "\u8BBE\u7F6E\u5757\u5C5E\u6027",
+    description: "\u8BBE\u7F6E\u5757\u7684\u81EA\u5B9A\u4E49\u5C5E\u6027\uFF08\u6807\u7B7E\u7B49\uFF09\u3002\u5C5E\u6027\u540D\u5FC5\u987B\u4EE5 custom- \u5F00\u5934\uFF08\u5185\u6838\u8981\u6C42\uFF09\u3002",
+    risk: "additive",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      attrs: {
+        type: "string",
+        required: true,
+        description: 'JSON \u5BF9\u8C61\u5B57\u7B26\u4E32\uFF0C\u952E\u987B\u4EE5 custom- \u5F00\u5934\uFF0C\u4F8B\u5982 {"custom-status":"done"}'
+      }
+    },
+    invoke: async (client, args) => {
+      const attrs = parseAttrs(args.attrs);
+      await client.setBlockAttrs(String(args.id), attrs);
+      return { text: `\u5DF2\u8BBE\u7F6E ${String(args.id)} \u7684\u5C5E\u6027\uFF1A${Object.keys(attrs).join(", ")}`, data: { id: args.id, attrs } };
+    }
+  }
+];
+var destructiveTools = [
+  {
+    name: "block_update",
+    title: "\u6539\u5199\u5757\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u7528\u65B0\u5185\u5BB9\u6574\u4F53\u8986\u76D6\u6307\u5B9A\u5757\uFF08\u5185\u6838 updateBlock \u662F\u8986\u76D6\u8BED\u4E49\uFF09\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u9ED8\u8BA4 lockType \u4E3A true\uFF0C\u5757\u7C7B\u578B\u53D8\u5316\u4F1A\u88AB\u62D2\u7EDD\u3002",
+    risk: "destructive",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      data: { type: "string", required: true, description: "\u65B0\u7684\u5757\u5185\u5BB9" },
+      dataType: { type: "string", description: "\u6570\u636E\u7C7B\u578B\uFF1Amarkdown", default: "markdown" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+      expectedHash: { type: "string", description: HASH_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("block_update");
+      const id = String(args.id);
+      const { preview, exists } = await buildBlockPreview(client, id);
+      requireConfirm(spec, args, preview, exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u8986\u76D6\u8BE5\u5757\u5185\u5BB9", preview), data: { dryRun: true, exists } };
+      }
+      await requireFreshHash(client, id, optionalString(args.expectedHash));
+      const ops = await client.updateBlock(id, String(args.data), String(args.dataType), true);
+      return { text: renderOps(`\u5DF2\u6539\u5199\u5757 ${id}`, ops), data: ops };
+    }
+  },
+  {
+    name: "block_delete",
+    title: "\u5220\u9664\u5757\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u5220\u9664\u6307\u5B9A\u5757\u53CA\u5176\u5B50\u5757\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u4E0D\u4F20\u5219\u53EA\u8FD4\u56DE\u9884\u89C8\u3002",
+    risk: "destructive",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC },
+      expectedHash: { type: "string", description: HASH_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("block_delete");
+      const id = String(args.id);
+      const { preview, exists } = await buildBlockPreview(client, id);
+      requireConfirm(spec, args, preview, exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u5220\u9664\u8BE5\u5757\u53CA\u5176\u5B50\u5757", preview), data: { dryRun: true, exists } };
+      }
+      await requireFreshHash(client, id, optionalString(args.expectedHash));
+      const ops = await client.deleteBlock(id);
+      return { text: renderOps(`\u5DF2\u5220\u9664\u5757 ${id}`, ops), data: ops };
+    }
+  },
+  {
+    name: "block_move",
+    title: "\u79FB\u52A8\u5757\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u628A\u5757\u79FB\u52A8\u5230\u53E6\u4E00\u4E2A\u7236\u5757\u4E0B\u6216\u67D0\u4E2A\u5757\u4E4B\u540E\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002",
+    risk: "destructive",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      parentID: { type: "string", description: "\u76EE\u6807\u7236\u5757 ID" },
+      previousID: { type: "string", description: "\u76EE\u6807\u524D\u4E00\u4F4D\u7F6E\u5757 ID" },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("block_move");
+      const id = String(args.id);
+      const parentID = optionalString(args.parentID);
+      const previousID = optionalString(args.previousID);
+      requireConfirm(spec, args, "\u79FB\u52A8\u5757\u4F1A\u6539\u53D8\u6587\u6863\u7ED3\u6784\uFF08\u53EF\u7528\u5185\u6838 undoOperations \u56DE\u9000\uFF09", true);
+      requireAnchor(spec, parentID, previousID, void 0);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u79FB\u52A8\u8BE5\u5757", `id=${id}`), data: { dryRun: true } };
+      }
+      const ops = await client.moveBlock(id, { parentID, previousID });
+      return { text: renderOps(`\u5DF2\u79FB\u52A8\u5757 ${id}`, ops), data: ops };
+    }
+  },
+  {
+    name: "doc_rename",
+    title: "\u91CD\u547D\u540D\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u4FEE\u6539\u6587\u6863\u6807\u9898\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\uFF1B\u4E0D\u4F20\u5219\u53EA\u8FD4\u56DE\u9884\u89C8\u3002",
+    risk: "destructive",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      title: { type: "string", required: true, description: "\u65B0\u7684\u6587\u6863\u6807\u9898" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_rename");
+      const id = String(args.id);
+      const title = requireName(spec, args, "title");
+      const { preview, exists } = await buildDocPreview(client, id);
+      requireConfirm(spec, args, preview, exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, `\u5C06\u91CD\u547D\u540D\u4E3A\u300C${title}\u300D`, preview), data: { dryRun: true, exists } };
+      }
+      await client.renameDocByID(id, title);
+      return { text: `\u5DF2\u91CD\u547D\u540D\u6587\u6863 ${id} \u4E3A\u300C${title}\u300D
+\u539F\u6709\u4F4D\u7F6E\uFF1A
+${preview}`, data: { id, title } };
+    }
+  },
+  {
+    name: "doc_move",
+    title: "\u79FB\u52A8\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u628A\u4E00\u4E2A\u6216\u591A\u4E2A\u6587\u6863\u79FB\u52A8\u5230\u76EE\u6807\u7236\u6587\u6863/\u7B14\u8BB0\u672C\u4E0B\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002",
+    risk: "destructive",
+    params: {
+      fromIDs: { type: "string", required: true, description: "\u6E90\u6587\u6863 ID\uFF0C\u591A\u4E2A\u7528\u9017\u53F7\u5206\u9694" },
+      toID: { type: "string", required: true, description: "\u76EE\u6807\u7236\u6587\u6863 ID \u6216\u7B14\u8BB0\u672C ID" },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_move");
+      const fromIDs = parseIdList(args.fromIDs);
+      const toID = requireName(spec, args, "toID");
+      const { preview } = await buildDocPreview(client, fromIDs[0]);
+      requireConfirm(spec, args, `\u5C06\u79FB\u52A8 ${fromIDs.length} \u4E2A\u6587\u6863\u5230 ${toID}
+${preview}`, true);
+      if (shouldDryRun(args)) {
+        return {
+          text: previewText(spec, `\u5C06\u79FB\u52A8 ${fromIDs.join(", ")} \u5230 ${toID}`, preview),
+          data: { dryRun: true, fromIDs, toID }
+        };
+      }
+      await client.moveDocsByID(fromIDs, toID);
+      return { text: `\u5DF2\u79FB\u52A8 ${fromIDs.length} \u4E2A\u6587\u6863\u5230 ${toID}\uFF1A${fromIDs.join(", ")}`, data: { fromIDs, toID } };
+    }
+  },
+  {
+    name: "doc_remove",
+    title: "\u5220\u9664\u6587\u6863\uFF08\u7834\u574F\u578B\uFF09",
+    description: "\u5220\u9664\u6587\u6863\u3002\u7834\u574F\u578B\uFF1A\u5FC5\u987B confirm: true\u3002\u5185\u6838\u4F1A\u5148\u628A\u6587\u6863\u5199\u5165\u6570\u636E\u5386\u53F2\uFF08\u6570\u636E\u5386\u53F2 \u4E2D\u53EF\u56DE\u6EDA\uFF0C\u53D7\u5386\u53F2\u4FDD\u7559\u8BBE\u7F6E\u9650\u5236\uFF09\u3002",
+    risk: "destructive",
+    params: {
+      id: { type: "string", required: true, description: ID_DESC },
+      confirm: { type: "boolean", description: CONFIRM_DESC },
+      dryRun: { type: "boolean", description: DRYRUN_DESC }
+    },
+    invoke: async (client, args) => {
+      const spec = findToolSpecOrThrow("doc_remove");
+      const id = String(args.id);
+      const { preview, exists } = await buildDocPreview(client, id);
+      requireConfirm(spec, args, preview, exists);
+      if (shouldDryRun(args)) {
+        return { text: previewText(spec, "\u5C06\u5220\u9664\u8BE5\u6587\u6863", preview), data: { dryRun: true, exists } };
+      }
+      await client.removeDocByID(id);
+      return {
+        text: `\u5DF2\u5220\u9664\u6587\u6863 ${id}
+\u5220\u9664\u524D\u4F4D\u7F6E\uFF1A
+${preview}
+
+\u63D0\u793A\uFF1A\u5185\u6838\u5DF2\u628A\u8BE5\u6587\u6863\u5199\u5165\u6570\u636E\u5386\u53F2\uFF0C\u53EF\u5728\u601D\u6E90\u300C\u6570\u636E\u5386\u53F2\u300D\u4E2D\u56DE\u6EDA\uFF08\u53D7\u5386\u53F2\u4FDD\u7559\u8BBE\u7F6E\u9650\u5236\uFF09\u3002`,
+        data: { id }
+      };
+    }
+  }
+];
+var TOOL_SPECS = [...readOnlyTools, ...additiveTools, ...destructiveTools];
+function findToolSpecOrThrow(name) {
+  const spec = TOOL_SPECS.find((item) => item.name === name);
+  if (!spec) throw new SiYuanError("SIYUAN_API_ERROR", `\u5185\u90E8\u9519\u8BEF\uFF1A\u672A\u6CE8\u518C\u5DE5\u5177 ${name}`);
+  return spec;
+}
+function optionalString(value) {
+  const text = value === void 0 || value === null ? "" : String(value).trim();
+  return text.length > 0 ? text : void 0;
+}
+
+// src/channels/vcp/index.ts
+function normalizeVcpArgs(req) {
+  const { command, params: nested, maid: _maid, ...flat } = req;
+  return { command: String(command ?? ""), args: { ...flat, ...nested ?? {} } };
+}
+function errorResponse(message) {
+  return {
+    status: "error",
+    error: message,
+    result: { content: [{ type: "text", text: message }] },
+    messageForAI: message
+  };
+}
+async function handleVcpRequest(req, client) {
+  const { command, args } = normalizeVcpArgs(req);
+  const outcome = await dispatchCommand(command, args, client, TOOL_SPECS);
+  if (outcome.ok) {
+    return {
+      status: "success",
+      result: { content: [{ type: "text", text: outcome.result.text }] },
+      messageForAI: outcome.result.text
+    };
+  }
+  const { code, message, hint } = outcome.error;
+  return errorResponse(`[${code}] ${message}${hint ? `
+\u63D0\u793A\uFF1A${hint}` : ""}`);
+}
+async function readStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(Buffer.from(chunk));
+  return Buffer.concat(chunks).toString("utf-8");
+}
+async function main() {
+  let response;
+  try {
+    const raw = await readStdin();
+    if (raw.trim().length === 0) {
+      response = errorResponse("[SIYUAN_API_ERROR] \u672A\u6536\u5230 VCP \u8BF7\u6C42\uFF08stdin \u4E3A\u7A7A\uFF09");
+    } else {
+      const req = JSON.parse(raw);
+      const client = new SiYuanClient(resolveSiYuanConfig());
+      response = await handleVcpRequest(req, client);
+    }
+  } catch (err) {
+    const described = describeError(err);
+    response = errorResponse(
+      `[${described.code}] ${described.message}${described.hint ? `
+\u63D0\u793A\uFF1A${described.hint}` : ""}`
+    );
+  }
+  process.stdout.write(JSON.stringify(response));
+}
+var entry = process.argv[1] ?? "";
+var isDirectRun = entry.endsWith("index.ts") || entry.endsWith("index.cjs") || entry.endsWith("index.js");
+if (isDirectRun) void main();
+// Annotate the CommonJS export names for ESM import in node:
+0 && (module.exports = {
+  errorResponse,
+  handleVcpRequest,
+  main,
+  normalizeVcpArgs
+});

@@ -1,0 +1,193 @@
+{
+  "manifestVersion": "2.0.0",
+  "name": "SiYuanAgent",
+  "displayName": "思源笔记读写桥",
+  "version": "0.1.0",
+  "description": "读写思源（SiYuan）笔记知识库：笔记本、文档树、块内容、全文检索、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块（破坏型操作强制 confirm 确认）。30 条工具，同步 stdio 架构，零 npm 依赖。",
+  "author": "xuzhen97",
+  "pluginType": "synchronous",
+  "entryPoint": {
+    "type": "nodejs",
+    "command": "node index.cjs"
+  },
+  "communication": {
+    "protocol": "stdio",
+    "timeout": 120000
+  },
+  "configSchema": {
+    "SIYUAN_HOST": {
+      "type": "string",
+      "description": "思源内核地址（默认 127.0.0.1）",
+      "default": "127.0.0.1"
+    },
+    "SIYUAN_PORT": {
+      "type": "integer",
+      "description": "思源内核 API 端口（默认 6806）",
+      "default": 6806
+    },
+    "SIYUAN_TOKEN": {
+      "type": "string",
+      "description": "思源 API Token（思源 → 设置 → 关于 中查看；未开启鉴权可留空）",
+      "default": ""
+    },
+    "SIYUAN_TIMEOUT_MS": {
+      "type": "integer",
+      "description": "请求超时（毫秒，默认 30000）",
+      "default": 30000
+    }
+  },
+  "capabilities": {
+    "invocationCommands": [
+      {
+        "command": "Version",
+        "description": "功能: 获取思源内核版本号，用于确认连接可用性与内核大版本。\n风险: 只读\n参数: 无\n`command` 固定为 Version，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」Version「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」Version「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "Status",
+        "description": "功能: 汇总连接状态、内核版本、内核时间与当前连接配置（host/port、是否带 Token），用于排查连不上或鉴权问题。\n风险: 只读\n参数: 无\n`command` 固定为 Status，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」Status「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」Status「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookList",
+        "description": "功能: 列出所有笔记本及其 id、名称与是否已关闭（closed）。任何按笔记本操作的起点。\n风险: 只读\n参数: 无\n`command` 固定为 NotebookList，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookList「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookList「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookInfo",
+        "description": "功能: 获取指定笔记本的配置与统计信息。\n风险: 只读\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n`command` 固定为 NotebookInfo，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookInfo「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookInfo「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocList",
+        "description": "功能: 列出指定笔记本路径下的直接子文档与子目录（不递归）。\n风险: 只读\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (可选) 笔记本内路径，默认根路径\n`command` 固定为 DocList，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocList「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocList「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocTree",
+        "description": "功能: 以指定文档为根递归列出其子文档树。内核不接受根路径：path 必须是文档路径（如 /20261009104613-x.sy）或文档 ID；要枚举整个笔记本的文档请用 doc_list（逐层）或 sql。注意：返回的是子文档 **ID 列表**，需要路径时再用 doc_hpath_by_id 解析。depth 控制最大深度（-1 表示不限）。\n风险: 只读\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (必填) 文档路径（如 /20261009104613-x.sy）或文档 ID；不能是根路径\n- depth: (可选) 最大深度，-1 为不限\n- sort: (可选) 排序模式，0 为默认\n`command` 固定为 DocTree，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocTree「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\ndepth:「始」2「末」,\nsort:「始」0「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocTree「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\ndepth:「始」2「末」,\nsort:「始」0「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocPathById",
+        "description": "功能: 由文档 ID 获取其所在笔记本与内核存储路径。\n风险: 只读\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n`command` 固定为 DocPathById，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocPathById「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocPathById「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocHpathById",
+        "description": "功能: 由文档 ID 获取人类可读路径（如 /笔记/甲）。\n风险: 只读\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n`command` 固定为 DocHpathById，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocHpathById「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocHpathById「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocIdsByHpath",
+        "description": "功能: 由笔记本内的人类可读路径获取对应文档 ID 列表。\n风险: 只读\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (必填) 人类可读路径，如 /笔记/甲\n`command` 固定为 DocIdsByHpath，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocIdsByHpath「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocIdsByHpath「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocExportMd",
+        "description": "功能: 把文档导出为 Markdown 文本；maxChars 控制最大返回字符数，超出会被截断并提示。\n风险: 只读\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- maxChars: (可选) 最大字符数\n`command` 固定为 DocExportMd，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocExportMd「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nmaxChars:「始」2000「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocExportMd「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nmaxChars:「始」2000「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockGet",
+        "description": "功能: 获取块的 kramdown 源文本；maxChars 控制最大返回字符数，是改写前的「先读」步骤。\n风险: 只读\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- maxChars: (可选) 最大字符数\n`command` 固定为 BlockGet，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockGet「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nmaxChars:「始」2000「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockGet「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nmaxChars:「始」2000「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockChildren",
+        "description": "功能: 获取指定块的直接子块列表。\n风险: 只读\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n`command` 固定为 BlockChildren，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockChildren「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockChildren「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockAttrsGet",
+        "description": "功能: 获取块的自定义属性键值对。\n风险: 只读\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n`command` 固定为 BlockAttrsGet，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAttrsGet「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAttrsGet「末」,\nid:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "SearchBlocks",
+        "description": "功能: 在块内容中做全文检索，返回命中的块及匹配统计。\n风险: 只读\n参数:\n- query: (必填) 检索关键词\n`command` 固定为 SearchBlocks，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」SearchBlocks「末」,\nquery:「始」会议「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」SearchBlocks「末」,\nquery:「始」会议「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "SearchDocs",
+        "description": "功能: 按关键词检索文档名称，返回命中的文档路径与 ID。\n风险: 只读\n参数:\n- k: (必填) 检索关键词\n`command` 固定为 SearchDocs，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」SearchDocs「末」,\nk:「始」会议「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」SearchDocs「末」,\nk:「始」会议「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "SearchTag",
+        "description": "功能: 按关键词检索标签名，k 为空时返回全部标签名。\n风险: 只读\n参数:\n- k: (可选) 标签关键词，可留空\n`command` 固定为 SearchTag，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」SearchTag「末」,\nk:「始」会议「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」SearchTag「末」,\nk:「始」会议「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "TagList",
+        "description": "功能: 列出知识库中的全部标签及引用计数（忽略内核的列表条数上限）。\n风险: 只读\n参数: 无\n`command` 固定为 TagList，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」TagList「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」TagList「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "Sql",
+        "description": "功能: 对内核 SQLite 索引执行只读 SQL 查询，是未覆盖场景的逃生通道。仅允许单条 SELECT 或 WITH 语句；变更类语句（INSERT/UPDATE/DELETE/DROP/PRAGMA 等）会被拒绝。无 LIMIT 时内核默认只返回 64 行并标记截断。\n风险: 只读\n参数:\n- stmt: (必填) 只读 SQL 语句（单条 SELECT 或 WITH）\n`command` 固定为 Sql，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」Sql「末」,\nstmt:「始」SELECT id, hpath FROM blocks WHERE type = 'd' LIMIT 20「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」Sql「末」,\nstmt:「始」SELECT id, hpath FROM blocks WHERE type = 'd' LIMIT 20「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "NotebookCreate",
+        "description": "功能: 创建一个新笔记本并返回其 ID。也是做写操作实验（沙盒）的起点。\n风险: 增量型（只增不改）\n参数:\n- name: (必填) 笔记本名称\n`command` 固定为 NotebookCreate，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookCreate「末」,\nname:「始」我的新笔记本「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」NotebookCreate「末」,\nname:「始」我的新笔记本「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocCreate",
+        "description": "功能: 在指定笔记本中按人读路径创建文档并写入 Markdown。同 path 重复调用不会覆盖已有文档（幂等）。\n风险: 增量型（只增不改）\n参数:\n- notebook: (必填) 笔记本 ID（由 notebook_list 获取）\n- path: (必填) 人读路径，需以 / 开头，如 /沙盒/甲\n- markdown: (可选) GFM Markdown 内容\n`command` 固定为 DocCreate，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocCreate「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\nmarkdown:「始」值「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocCreate「末」,\nnotebook:「始」20210817205410-2kvfpfn「末」,\npath:「始」/笔记/甲「末」,\nmarkdown:「始」值「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockAppend",
+        "description": "功能: 把内容追加到指定块（通常是文档 ID）的子块末尾。写入新内容的首选方式。\n风险: 增量型（只增不改）\n参数:\n- parentID: (必填) 父块 ID（文档 ID 也可）\n- data: (必填) 要写入的内容\n- dataType: (可选) 数据类型：markdown\n`command` 固定为 BlockAppend，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAppend「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAppend「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockPrepend",
+        "description": "功能: 把内容插入到指定块的子块开头。\n风险: 增量型（只增不改）\n参数:\n- parentID: (必填) 父块 ID（文档 ID 也可）\n- data: (必填) 要写入的内容\n- dataType: (可选) 数据类型：markdown\n`command` 固定为 BlockPrepend，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockPrepend「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockPrepend「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockInsert",
+        "description": "功能: 按锚点插入新块。nextID / previousID / parentID 至少一个有效，内核优先级 nextID > previousID > parentID。\n风险: 增量型（只增不改）\n参数:\n- data: (必填) 要写入的内容\n- dataType: (可选) 数据类型：markdown\n- parentID: (可选) 父块 ID（挂到其下）\n- previousID: (可选) 前一个块 ID（插到其后）\n- nextID: (可选) 后一个块 ID（插到其前）\n`command` 固定为 BlockInsert，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockInsert「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\npreviousID:「始」20210817205410-2kvfpfn「末」,\nnextID:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockInsert「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\npreviousID:「始」20210817205410-2kvfpfn「末」,\nnextID:「始」20210817205410-2kvfpfn「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockAttrsSet",
+        "description": "功能: 设置块的自定义属性（标签等）。属性名必须以 custom- 开头（内核要求）。\n风险: 增量型（只增不改）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- attrs: (必填) JSON 对象字符串，键须以 custom- 开头，例如 {\"custom-status\":\"done\"}\n`command` 固定为 BlockAttrsSet，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAttrsSet「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nattrs:「始」{\"custom-status\":\"done\"}「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockAttrsSet「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nattrs:「始」{\"custom-status\":\"done\"}「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockUpdate",
+        "description": "功能: 用新内容整体覆盖指定块（内核 updateBlock 是覆盖语义）。破坏型：必须 confirm: true；默认 lockType 为 true，块类型变化会被拒绝。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- data: (必填) 新的块内容\n- dataType: (可选) 数据类型：markdown\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n- expectedHash: (可选) 可选乐观并发校验：传入目标的当前 blocks hash，不一致则拒绝覆盖\n`command` 固定为 BlockUpdate，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockUpdate「末」,\nid:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」,\nexpectedHash:「始」adbd55e「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockUpdate「末」,\nid:「始」20210817205410-2kvfpfn「末」,\ndata:「始」## 新内容「末」,\ndataType:「始」markdown「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」,\nexpectedHash:「始」adbd55e「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockDelete",
+        "description": "功能: 删除指定块及其子块。破坏型：必须 confirm: true；不传则只返回预览。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n- expectedHash: (可选) 可选乐观并发校验：传入目标的当前 blocks hash，不一致则拒绝覆盖\n`command` 固定为 BlockDelete，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockDelete「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」,\nexpectedHash:「始」adbd55e「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockDelete「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」,\nexpectedHash:「始」adbd55e「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "BlockMove",
+        "description": "功能: 把块移动到另一个父块下或某个块之后。破坏型：必须 confirm: true。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- parentID: (可选) 目标父块 ID\n- previousID: (可选) 目标前一位置块 ID\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 BlockMove，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockMove「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\npreviousID:「始」20210817205410-2kvfpfn「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」BlockMove「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\nparentID:「始」20210817205410-2kvfpfn「末」,\npreviousID:「始」20210817205410-2kvfpfn「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocRename",
+        "description": "功能: 修改文档标题。破坏型：必须 confirm: true；不传则只返回预览。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- title: (必填) 新的文档标题\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocRename，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRename「末」,\nid:「始」20210817205410-2kvfpfn「末」,\ntitle:「始」新的文档标题「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRename「末」,\nid:「始」20210817205410-2kvfpfn「末」,\ntitle:「始」新的文档标题「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocMove",
+        "description": "功能: 把一个或多个文档移动到目标父文档/笔记本下。破坏型：必须 confirm: true。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- fromIDs: (必填) 源文档 ID，多个用逗号分隔\n- toID: (必填) 目标父文档 ID 或笔记本 ID\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocMove，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocMove「末」,\nfromIDs:「始」20210917220056-yxtyl7i「末」,\ntoID:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocMove「末」,\nfromIDs:「始」20210917220056-yxtyl7i「末」,\ntoID:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      },
+      {
+        "command": "DocRemove",
+        "description": "功能: 删除文档。破坏型：必须 confirm: true。内核会先把文档写入数据历史（数据历史 中可回滚，受历史保留设置限制）。\n风险: 破坏型（必须传 confirm: true，不传只返回预览并拒绝执行）\n参数:\n- id: (必填) 块或文档 ID，形如 20210817205410-2kvfpfn\n- confirm: (可选) 确认标志：必须显式传 true 才执行；不传或传 false 时只返回预览并拒绝（防误操作）\n- dryRun: (可选) 只预览影响、不写内核；仅传字面 true 生效\n`command` 固定为 DocRemove，不得填写 Shell 命令、路径或自然语言。\n调用示例:\n<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRemove「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>",
+        "example": "<<<[TOOL_REQUEST]>>>\nmaid:「始」Nova「末」,\ntool_name:「始」SiYuanAgent「末」,\ncommand:「始」DocRemove「末」,\nid:「始」20210817205410-2kvfpfn「末」,\nconfirm:「始」true「末」,\ndryRun:「始」true「末」\n<<<[END_TOOL_REQUEST]>>>"
+      }
+    ]
+  }
+}

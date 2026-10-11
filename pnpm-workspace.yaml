@@ -1,0 +1,8 @@
+---
+# pnpm 11：依赖构建脚本的显式许可清单（pnpm run/exec 的状态检查会读取此处）
+allowBuilds:
+  # esbuild：实测不需要 postinstall，走 optional 平台包即可（transformSync 已验证可用）
+  esbuild: false
+  # 以下为 @earendil-works/pi-coding-agent 的传递依赖，本项目不使用它们的构建脚本
+  '@google/genai': false
+  protobufjs: false

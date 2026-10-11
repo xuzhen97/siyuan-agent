@@ -1,0 +1,8 @@
+# 临时材料（Spec / Plan / 探针），不进 Git
+.tmp/
+
+# 依赖与构建缓存
+node_modules/
+*.tsbuildinfo
+
+# 注意：dist/ 与 plugins/*/index.cjs 是提交进仓库的制品（ADR-0003），不要忽略

@@ -1,0 +1,14 @@
+{
+  "plugins": [
+    {
+      "name": "SiYuanAgent",
+      "displayName": "思源笔记读写桥",
+      "description": "读写思源（SiYuan）笔记知识库：笔记本、文档树、块内容、全文检索、SQL 查询、Markdown 导出，以及写入/修改/删除笔记与块（破坏型操作强制 confirm 确认）。30 条工具，同步 stdio 架构，零 npm 依赖。",
+      "version": "0.1.0",
+      "author": "xuzhen97",
+      "category": "knowledge",
+      "icon": "book",
+      "path": "plugins/siyuan-agent"
+    }
+  ]
+}

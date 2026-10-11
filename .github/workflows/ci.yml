@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+
+      - name: 类型检查
+        run: pnpm typecheck
+
+      - name: 生成物漂移门（真源 vs 制品）
+        run: pnpm generate:check
+
+      # 必须先构建：VCP / CLI 的端到端测试直接调用制品（index.cjs / dist/cli.cjs）
+      - name: 构建制品
+        run: pnpm build:vcp && pnpm build:cli
+
+      - name: 单元 / 通道 / 契约测试
+        run: pnpm test
+
+      - name: 制品与源码一致（构建产物未被手改）
+        run: |
+          git diff --exit-code -- \
+            plugins/siyuan-agent/index.cjs \
+            dist/cli.cjs \
+            plugins/siyuan-agent/plugin-manifest.json \
+            skills/siyuan/SKILL.md

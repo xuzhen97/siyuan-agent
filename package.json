@@ -1,0 +1,32 @@
+{
+  "name": "siyuan-agent",
+  "version": "0.1.0",
+  "description": "SiYuan (思源笔记) 只读知识库访问基础项目：Pi 扩展 + VCP 插件 + CLI，一份工具定义真源",
+  "type": "module",
+  "license": "MIT",
+  "author": "xuzhen97",
+  "packageManager": "pnpm@11.21.0",
+  "engines": { "node": ">=20" },
+  "bin": { "siyuan-agent": "dist/cli.cjs" },
+  "files": ["extensions/", "skills/", "src/", "dist/", "README.md", "LICENSE"],
+  "pi": {
+    "extensions": ["./extensions/index.ts"],
+    "skills": ["./skills"]
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "generate": "node --experimental-strip-types scripts/generate.ts",
+    "generate:check": "node --experimental-strip-types scripts/generate.ts --check",
+    "build:vcp": "node --experimental-strip-types scripts/bundle-vcp.ts",
+    "build:cli": "esbuild src/channels/cli/index.ts --bundle --platform=node --format=cjs --outfile=dist/cli.cjs"
+  },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.1.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.0"
+  }
+}
